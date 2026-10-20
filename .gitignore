@@ -1,0 +1,10 @@
+build/
+build-*/
+*.o
+*.a
+*.lib
+Makefile*
+.qmake.stash
+*.pro.user*
+moc_*
+turbulence_test_data/
