@@ -13,7 +13,7 @@
 TEMPLATE = app
 TARGET = TurbulenceAnalysis
 QT += core gui widgets
-CONFIG += c++11
+CONFIG += c++11 thread
 QMAKE_CXXFLAGS_WARN_ON += -Wall
 
 # ---------------------------------------------------------------------------------
@@ -81,7 +81,9 @@ HEADERS += \
     core/AlgorithmRegistry.h \
     core/AnalysisEngine.h \
     core/ResultExporter.h \
-    core/algorithms/Algorithms.h
+    core/algorithms/Algorithms.h \
+    core/optimization/Separability.h \
+    core/optimization/ParameterOptimizer.h
 
 SOURCES += \
     core/Types.cpp \
@@ -95,7 +97,9 @@ SOURCES += \
     core/ResultExporter.cpp \
     core/algorithms/IntensityAlgorithms.cpp \
     core/algorithms/StructureAlgorithms.cpp \
-    core/algorithms/MotionAlgorithms.cpp
+    core/algorithms/MotionAlgorithms.cpp \
+    core/optimization/Separability.cpp \
+    core/optimization/ParameterOptimizer.cpp
 
 # Qt Widgets GUI
 HEADERS += \
@@ -103,7 +107,9 @@ HEADERS += \
     app/AnalysisWorker.h \
     app/ParameterEditor.h \
     app/RoiPreviewWidget.h \
-    app/DatasetConfig.h
+    app/DatasetConfig.h \
+    app/OptimizationWorker.h \
+    app/OptimizationWindow.h
 
 SOURCES += \
     app/main.cpp \
@@ -111,4 +117,6 @@ SOURCES += \
     app/AnalysisWorker.cpp \
     app/ParameterEditor.cpp \
     app/RoiPreviewWidget.cpp \
-    app/DatasetConfig.cpp
+    app/DatasetConfig.cpp \
+    app/OptimizationWorker.cpp \
+    app/OptimizationWindow.cpp

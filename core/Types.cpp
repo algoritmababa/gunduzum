@@ -56,6 +56,7 @@ ParamSpec ParamSpec::makeBool(const std::string &key, const std::string &label, 
     s.label = label;
     s.tooltip = tooltip;
     s.type = Bool;
+    s.tunable = true;
     s.defaultValue = def ? 1.0 : 0.0;
     s.minValue = 0;
     s.maxValue = 1;
@@ -71,6 +72,7 @@ ParamSpec ParamSpec::makeChoice(const std::string &key, const std::string &label
     s.label = label;
     s.tooltip = tooltip;
     s.type = Choice;
+    s.tunable = true;
     s.choices = choices;
     s.defaultValue = def;
     s.minValue = 0;

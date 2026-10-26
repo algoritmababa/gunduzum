@@ -168,7 +168,7 @@ std::vector<ParamSpec> TemporalStructureAnalysis::parameterSpecs() const
         ReferenceFrame::fixedIndexParam(),
         ParamSpec::makeBool("pixel_p95", "Per-frame pixel P95 of |difference|", true,
                             "Compute the 95th percentile of |I_t - I_ref| over the ROI pixels of each frame "
-                            "(partial sort per frame)."),
+                            "(partial sort per frame).").fixed(),
     };
 }
 

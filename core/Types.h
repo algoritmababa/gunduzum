@@ -47,6 +47,28 @@ struct ParamSpec {
     int decimals = 3;
     std::vector<std::string> choices; // for Choice: value is the index
 
+    // Parameter optimization metadata. Choice and Bool parameters are searched over all their
+    // values unless marked fixed(); Int / Double parameters are only searched when a search
+    // range was given with tune() (their min/max are validity bounds, not sensible ranges).
+    bool tunable = false;
+    double searchMin = 0.0;
+    double searchMax = 0.0;
+    bool searchLog = false; // search on a logarithmic grid (searchMin must be > 0)
+
+    ParamSpec &tune(double lo, double hi, bool logScale = false)
+    {
+        tunable = true;
+        searchMin = lo;
+        searchMax = hi;
+        searchLog = logScale;
+        return *this;
+    }
+    ParamSpec &fixed()
+    {
+        tunable = false;
+        return *this;
+    }
+
     static ParamSpec makeInt(const std::string &key, const std::string &label, int def, int min, int max,
                              const std::string &tooltip = std::string());
     static ParamSpec makeDouble(const std::string &key, const std::string &label, double def, double min,

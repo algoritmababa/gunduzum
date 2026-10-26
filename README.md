@@ -4,9 +4,11 @@ C++ / Qt Widgets / OpenCV 3.x tabanlı, **görüntüden türetilen feature araş
 Sabit bir hedefe ait frame setlerinde klasik görüntü işleme algoritmalarını çalıştırır ve
 sonuçları yalnızca **sayısal** olarak (tablo, CSV, JSON) üretir.
 
-> Bu uygulama bir "turbulence meter" değildir. Classifier, LOW/MEDIUM/HIGH kararı, sabit
+> Bu uygulama bir "turbulence meter" değildir. Otomatik LOW/MEDIUM/HIGH kararı, sabit
 > eşik değerleri ve grafik/plot **bilinçli olarak yoktur**. Amaç: atmosferik koşul değiştiğinde
 > hangi feature'ların anlamlı, tekrarlanabilir ve ayırt edici şekilde değiştiğini bulmak.
+> Etiketli veri varsa, hangi algoritma ve parametrelerin kategorileri en iyi ayırdığı
+> **Parametre optimizasyonu** penceresiyle aranabilir (aşağıya bakın).
 
 ## İş akışı
 
@@ -33,7 +35,10 @@ core/                 Analiz çekirdeği: saf C++11 + OpenCV (Qt bağımlılığ
   Statistics.*          mean/variance/std/RMS/min/max/P95, per-pixel Welford
   ResultExporter.*      Frame CSV, summary CSV, JSON, karşılaştırma CSV, feature matrix CSV
   algorithms/           8 algoritma
-app/                  Qt Widgets GUI (worker thread, dinamik tablolar, ROI seçimi)
+  optimization/         Etiketli veriyle parametre optimizasyonu ve algoritma seçimi
+    Separability.*        Fisher oranı, kayıt bazlı çapraz doğrulamalı nearest-centroid
+    ParameterOptimizer.*  Pencereleme, coarse-to-fine arama, recursive algoritma eleme
+app/                  Qt Widgets GUI (worker thread, dinamik tablolar, ROI seçimi, optimizasyon penceresi)
 cli/                  Komut satırı (batch / script)
 tests/                Bilinen ground-truth'lu sentetik veri ile otomatik testler
 ```
@@ -161,6 +166,52 @@ GUI'de gösterilir, JSON'a ve feature matrix CSV'ye yazılır.
 * **Per-frame normalization** (min/max, z-score) mutlak yoğunluk dalgalanmasını yok eder;
   yoğunluk/scintillation feature'ları bu durumda uyarı notu üretir.
 
+## Parametre optimizasyonu (etiketli veri)
+
+**Tools → Parameter optimization (labeled data)…** veya Run panelindeki butonla açılır.
+Üç kategoriye (varsayılan adlar LOW / MEDIUM / HIGH, değiştirilebilir) ayrılmış kayıtlar
+(görüntü klasörleri veya videolar) üzerinde, kategorileri en iyi ayıran algoritmaları ve
+parametreleri arar.
+
+**Örnekler.** Feature'lar zamansal istatistik olduğu için örnek tek görüntü değil, bir
+**kare penceresidir**: her kayıt `Window length` karelik pencerelere bölünür, her pencere bir
+etiketli örnektir (`Max windows / recording` ile kayıt boyunca eşit aralıklı seçilir).
+Her kaydın ROI'si, varsa kendi dataset config dosyasından (`turbulence_dataset.json`), yoksa
+ana pencereden alınır. Preprocessing ve registration ana penceredeki ayarlardır.
+
+**Amaç fonksiyonu.** Varsayılan: çapraz doğrulamalı **dengeli doğruluk** (z-score edilmiş
+feature'lar üzerinde nearest-centroid), eşitlikte en iyi 3 feature'ın **Fisher oranı**
+(sınıflar arası / sınıf içi varyans) belirleyici. Alternatif: yalnızca Fisher oranı. Her kategoride
+en az 2 kayıt varsa doğrulama **kayıt bazlıdır** (leave-one-recording-out); aynı kaydın
+pencereleri birbirine benzediği için pencere bazlı doğrulama iyimser sonuç verir ve bu durumda
+uyarı yazılır.
+
+**Recursive arama.**
+1. *Parametreler* (her algoritma için, koordinat bazlı): seviye 0'da her optimize edilebilir parametre
+   tek tek taranır — Choice/Bool parametrelerin tüm değerleri, sayısal parametrelerin arama aralığında
+   `Grid points` kadar değer. Sonraki her seviyede sayısal aralıklar en iyi değerin etrafına (bir ızgara
+   adımı) daraltılıp tarama tekrarlanır (`Refinement levels` = özyineleme derinliği). Arama aralıkları
+   algoritmaların `ParamSpec::tune()` tanımlarından gelir; veriye bağlı parametreler (eşik değeri,
+   sabit referans karesi vb.) sabit tutulur.
+2. *Algoritma seçimi* (recursive elimination): optimize edilmiş tüm algoritmaların feature'ları
+   birleştirilir; her adımda çıkarılması birleşik skoru en az düşüren algoritma elenir. En yüksek
+   skorlu küme (eşitlikte daha küçük olan) seçilir.
+
+**Hız.** Aynı adımdaki tüm aday parametre setleri tek veri geçişinde birlikte çalışır (her pencere
+geçiş başına bir kez okunur), pencereler CPU çekirdeklerine paralel dağıtılır, aynı parametre seti
+iki kez hesaplanmaz. `Max evaluations` toplam bütçeyi sınırlar. Uzun kayıtlarda önce kısa pencere,
+az pencere ve `Frame step` ile kaba bir arama yapmak önerilir.
+
+**Sonuçlar.** *Algorithm ranking* (skor, başlangıç → en iyi doğruluk, en ayırt edici feature,
+en iyi parametreler), *Feature separation* (her feature'ın Fisher oranı ve kategori bazında
+ortalama ± std, karışıklık matrisi, arama geçmişi), *Algorithm selection* (eleme adımları), *Log*.
+"Apply selected…" seçili algoritmayı ve parametrelerini ana pencereye aktarır. Rapor JSON'a,
+pencere bazlı feature'lar (her algoritmanın en iyi parametreleriyle) CSV'ye aktarılabilir. Kurulum
+(kategoriler, kayıtlar, ayarlar) JSON olarak kaydedilip yüklenebilir.
+
+> Uyarı: parametreler aynı doğrulama ile seçildiği için (iç içe doğrulama yok) raporlanan doğruluk
+> iyimserdir. Seçilen yapılandırmayı optimizasyonda kullanılmamış kayıtlarla doğrulayın.
+
 ## Testler
 
 ```bash
@@ -171,13 +222,17 @@ Bilinen sub-pixel kaydırma, kazanç ve blur ile sentetik 16-bit görüntü dizi
 şunları doğrular: istatistik fonksiyonları, natural sort, phase correlation (tüm referans modları),
 translation/affine registration, centroid (binary/Otsu/adaptive, ROI offset), optical flow,
 yoğunluk/scintillation formülleri ve sıfıra bölme koruması, blur ile Laplacian/gradient düşüşü,
-structure analysis, multiple-algorithm modu, frame aralığı/adımı, exporter'lar ve iptal.
+structure analysis, multiple-algorithm modu, frame aralığı/adımı, exporter'lar ve iptal;
+ayrıca Fisher oranı / çapraz doğrulama ve 3 kategorili sentetik veride optimizer (pencereleme,
+kayıt bazlı doğrulama, bütçe, recursive eleme, iptal).
 
 ## Genişletme
 
 Yeni algoritma: `turb::Algorithm`'dan türetin (`parameterSpecs()`, `begin()`, `processFrame()`,
 `finish()`), `AlgorithmRegistry` kurucusuna `add<YeniAlgoritma>(öncelik)` ekleyin. GUI parametre
 formu, sonuç tablosu, CSV/JSON çıktıları ve karşılaştırma tablosu otomatik olarak çalışır.
+Parametrelerine `.tune(min, max[, log])` ile arama aralığı verilirse (Choice/Bool parametreler
+varsayılan olarak, `.fixed()` ile hariç tutulabilir) optimizasyon penceresi de onları otomatik arar.
 
 Multiple algorithm mode motor tarafında hazırdır (`AnalysisConfig::algorithms` birden çok giriş
 alır, her frame geçiş başına bir kez çözülür); GUI'de `MainWindow::kAllowMultipleAlgorithms`

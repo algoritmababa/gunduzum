@@ -6,6 +6,8 @@
 #include "FrameSource.h"
 #include "ResultExporter.h"
 #include "Statistics.h"
+#include "optimization/ParameterOptimizer.h"
+#include "optimization/Separability.h"
 
 #include <opencv2/imgcodecs/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -147,6 +149,101 @@ static void testStatistics()
     p.add(a);
     p.add(b);
     CHECK_NEAR(p.variance().at<double>(0, 0), 1.0, 1e-12, "pixel variance");
+}
+
+
+static void testSeparability()
+{
+    using namespace separability;
+    // perfectly separated feature vs. pure noise
+    const std::vector<int> y = {0, 0, 0, 1, 1, 1, 2, 2, 2};
+    const std::vector<double> good = {1, 1.1, 0.9, 5, 5.1, 4.9, 9, 9.1, 8.9};
+    const std::vector<double> bad = {1, 5, 9, 1, 5, 9, 1, 5, 9};
+    CHECK(fisherRatio(good, y, 3) > 100.0, "fisher of separated feature " << fisherRatio(good, y, 3));
+    CHECK_NEAR(fisherRatio(bad, y, 3), 0.0, 1e-12, "fisher of non-separating feature");
+    Matrix X;
+    for (size_t i = 0; i < y.size(); ++i)
+        X.push_back({good[i], bad[i], 3.0 /* constant -> unusable */});
+    const std::vector<size_t> cols = usableColumns(X);
+    CHECK(cols.size() == 2, "constant column dropped");
+    std::vector<int> groups;
+    for (size_t i = 0; i < y.size(); ++i)
+        groups.push_back(int(i));
+    CHECK_NEAR(nearestCentroidCv(X, y, groups, 3, std::vector<size_t>{0}).balancedAccuracy, 1.0, 1e-12,
+               "cv accuracy of separated feature");
+    CHECK(nearestCentroidCv(X, y, groups, 3, std::vector<size_t>{1}).balancedAccuracy < 0.5,
+          "cv accuracy of noise feature");
+}
+
+// 3 classes x 2 recordings; the classes differ in jitter amplitude and blur.
+static void testOptimizer(const std::string &work)
+{
+    const double jitter[3] = {0.15, 0.7, 1.6};
+    const double blur[3] = {0.0, 0.8, 1.6};
+    cv::RNG rng(99);
+    OptimizationConfig oc;
+    oc.classNames = {"LOW", "MEDIUM", "HIGH"};
+    for (int k = 0; k < 3; ++k)
+        for (int rec = 0; rec < 2; ++rec) {
+            Truth t;
+            for (int i = 0; i < 48; ++i) {
+                t.dx.push_back(rng.gaussian(jitter[k]));
+                t.dy.push_back(rng.gaussian(jitter[k]));
+                t.gain.push_back(1.0 + rng.gaussian(0.01));
+                t.blur.push_back(blur[k]);
+            }
+            const std::string dir = work + "/opt_c" + std::to_string(k) + "_r" + std::to_string(rec);
+            writeSequence(dir, t, 64);
+            LabeledSource src;
+            src.path = dir;
+            src.label = k;
+            oc.sources.push_back(src);
+        }
+    oc.windowLength = 16;
+    oc.maxWindowsPerSource = 3;
+    oc.algorithmIds = {"phase_correlation", "laplacian_variance", "temporal_intensity_variance"};
+    oc.refinementLevels = 2;
+    oc.gridPoints = 3;
+    oc.maxEvaluations = 60;
+    oc.threads = 2;
+
+    std::vector<std::string> logLines;
+    int progressCalls = 0;
+    ParameterOptimizer opt;
+    const OptimizationReport rep = opt.run(
+        oc, [&](const OptimizationProgress &) { ++progressCalls; },
+        [&](const std::string &l) { logLines.push_back(l); }, nullptr);
+    CHECK(rep.ok, "optimizer run: " << rep.error);
+    if (!rep.ok)
+        return;
+    CHECK(rep.samples.size() == 18, "sample windows " << rep.samples.size());
+    CHECK(rep.validation.find("recording-out") != std::string::npos, "grouped validation");
+    CHECK(rep.algorithms.size() == 3, "outcomes");
+    CHECK(progressCalls > 0 && !logLines.empty(), "progress / log callbacks");
+    CHECK(rep.evaluations <= oc.maxEvaluations + 20, "evaluation budget " << rep.evaluations);
+    for (const AlgorithmOutcome &o : rep.algorithms) {
+        CHECK(o.bestScore >= o.initialScore - 1e-12, "search never gets worse " << o.id);
+        CHECK(o.sampleFeatures.size() == rep.samples.size(), "feature rows " << o.id);
+        std::cout << "  optimizer: " << o.id << " accuracy " << o.initialAccuracy << " -> " << o.bestAccuracy
+                  << " (" << o.evaluations << " evals)  " << o.bestParamText << "\n";
+    }
+    const AlgorithmOutcome &top = rep.algorithms.front();
+    CHECK(top.bestAccuracy >= 0.9, "best algorithm separates the classes " << top.id << " " << top.bestAccuracy);
+    CHECK(rep.selection.size() == 3 && rep.bestSelectionStep >= 0, "recursive elimination steps");
+    CHECK(rep.selection.back().algorithms.size() == 1, "elimination ends with one algorithm");
+
+    // cancellation
+    std::atomic<bool> cancel(true);
+    const OptimizationReport rc = opt.run(oc, ParameterOptimizer::ProgressCallback(),
+                                          ParameterOptimizer::LogCallback(), &cancel);
+    CHECK(!rc.ok && rc.cancelled, "optimizer cancellation");
+
+    // a class with a single short sample is rejected
+    OptimizationConfig bad = oc;
+    bad.sources.resize(5);
+    bad.windowLength = 0;
+    CHECK(!opt.run(bad, ParameterOptimizer::ProgressCallback(), ParameterOptimizer::LogCallback(), nullptr).ok,
+          "too few samples rejected");
 }
 
 int main(int argc, char **argv)
@@ -433,6 +530,9 @@ int main(int argc, char **argv)
         AnalysisOutput o = e.run(baseConfig(motionDir, "laplacian_variance"), AnalysisEngine::ProgressCallback(), &cancel);
         CHECK(!o.ok && o.cancelled, "cancellation");
     }
+
+    testSeparability();
+    testOptimizer(work);
 
     std::cout << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
     return g_failures == 0 ? 0 : 1;

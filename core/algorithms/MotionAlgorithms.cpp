@@ -31,7 +31,7 @@ std::vector<ParamSpec> PhaseCorrelationDisplacement::parameterSpecs() const
                             "to the ROI, so for whole-ROI shifts it biases the sub-pixel estimate towards zero."),
         ParamSpec::makeDouble("min_response", "Minimum peak response", 0.0, 0.0, 1.0, 0.01, 3,
                               "Frames whose phase-correlation peak response is below this value are marked "
-                              "invalid and excluded from the statistics (0 = keep all)."),
+                              "invalid and excluded from the statistics (0 = keep all).").tune(0.0, 0.5),
     };
 }
 
@@ -158,12 +158,12 @@ std::vector<ParamSpec> CentroidJitter::parameterSpecs() const
         ParamSpec::makeDouble("threshold", "Threshold (intensity units)", 128.0, -1e9, 1e9, 1.0, 4,
                               "Used by Binary threshold, in the units of the preprocessed frame."),
         ParamSpec::makeInt("adaptive_block", "Adaptive block size", 31, 3, 1001,
-                           "Neighbourhood size of cv::adaptiveThreshold (forced odd)."),
+                           "Neighbourhood size of cv::adaptiveThreshold (forced odd).").tune(3, 101),
         ParamSpec::makeDouble("adaptive_c", "Adaptive C", 5.0, -255.0, 255.0, 0.5, 2,
-                              "Constant subtracted from the local mean (8-bit scale)."),
+                              "Constant subtracted from the local mean (8-bit scale).").tune(-30.0, 30.0),
         ParamSpec::makeChoice("morphology", "Morphological filtering", {"None", "Open", "Close", "Open + Close"},
                               MorphOpen),
-        ParamSpec::makeInt("morph_kernel", "Morphology kernel", 3, 1, 101, "Elliptical structuring element size."),
+        ParamSpec::makeInt("morph_kernel", "Morphology kernel", 3, 1, 101, "Elliptical structuring element size.").tune(1, 15),
         ParamSpec::makeChoice("target", "Target selection", {"Largest contour", "All foreground pixels"},
                               TargetLargestContour),
         ParamSpec::makeDouble("min_area", "Minimum target area (px)", 10.0, 0.0, 1e9, 1.0, 1,
@@ -390,16 +390,16 @@ std::vector<ParamSpec> OpticalFlowLK::parameterSpecs() const
         ParamSpec::makeChoice("reference", "Reference", {"Previous frame", "First frame"}, FlowPrevious,
                               "Previous: frame-to-frame flow, features re-detected every frame. First: features "
                               "detected once on the first frame and tracked from it to every frame."),
-        ParamSpec::makeInt("max_corners", "Max feature points", 200, 1, 100000),
-        ParamSpec::makeDouble("quality_level", "Feature quality level", 0.01, 0.0001, 1.0, 0.001, 4),
-        ParamSpec::makeDouble("min_distance", "Min feature distance (px)", 5.0, 0.0, 1000.0, 1.0, 1),
-        ParamSpec::makeInt("win_size", "LK window size", 21, 3, 201),
-        ParamSpec::makeInt("max_level", "Pyramid levels", 3, 0, 8),
+        ParamSpec::makeInt("max_corners", "Max feature points", 200, 1, 100000).tune(20, 500, true),
+        ParamSpec::makeDouble("quality_level", "Feature quality level", 0.01, 0.0001, 1.0, 0.001, 4).tune(0.001, 0.1, true),
+        ParamSpec::makeDouble("min_distance", "Min feature distance (px)", 5.0, 0.0, 1000.0, 1.0, 1).tune(1.0, 20.0),
+        ParamSpec::makeInt("win_size", "LK window size", 21, 3, 201).tune(5, 51),
+        ParamSpec::makeInt("max_level", "Pyramid levels", 3, 0, 8).tune(0, 5),
         ParamSpec::makeDouble("max_error", "Max LK error (0 = off)", 0.0, 0.0, 1e6, 1.0, 2),
         ParamSpec::makeBool("fb_check", "Forward-backward check", true,
                             "Track back from the current to the reference frame and reject vectors whose "
                             "round-trip error exceeds the threshold."),
-        ParamSpec::makeDouble("fb_threshold", "Forward-backward threshold (px)", 0.5, 0.01, 100.0, 0.1, 2),
+        ParamSpec::makeDouble("fb_threshold", "Forward-backward threshold (px)", 0.5, 0.01, 100.0, 0.1, 2).tune(0.1, 3.0, true),
         ParamSpec::makeBool("remove_global_motion", "Remove per-frame mean motion", false,
                             "Subtract the mean flow vector of each frame so that only local deformation "
                             "remains (global tilt / jitter removed)."),

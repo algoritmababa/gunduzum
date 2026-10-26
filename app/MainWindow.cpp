@@ -4,6 +4,7 @@
 #include "AnalysisWorker.h"
 #include "DatasetConfig.h"
 #include "FrameSource.h"
+#include "OptimizationWindow.h"
 #include "ParameterEditor.h"
 #include "RoiPreviewWidget.h"
 
@@ -26,6 +27,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -135,6 +137,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
 
 void MainWindow::buildUi()
 {
+    QMenu *tools = menuBar()->addMenu(tr("&Tools"));
+    tools->addAction(tr("Parameter optimization (labeled data)..."), this, SLOT(openOptimization()));
+
     QSplitter *split = new QSplitter(Qt::Horizontal);
     QWidget *left = new QWidget;
     QVBoxLayout *lv = new QVBoxLayout(left);
@@ -371,6 +376,10 @@ QWidget *MainWindow::buildConfigPanel()
     stRow->addWidget(m_statusLabel, 1);
     stRow->addWidget(m_frameLabel);
     runv->addLayout(stRow);
+    QPushButton *bOpt = new QPushButton(tr("Parameter optimization (labeled data)..."));
+    bOpt->setToolTip(tr("Optimize algorithm selection and parameters on recordings labeled with 3 categories."));
+    connect(bOpt, &QPushButton::clicked, this, &MainWindow::openOptimization);
+    runv->addWidget(bOpt);
     m_runPanel = run; // placed below the scroll area so it stays enabled while running
     v->addStretch(1);
 
@@ -822,6 +831,46 @@ void MainWindow::onAlgorithmItemChanged(QTreeWidgetItem *item, int)
         m_algTree->setCurrentItem(item);
         showParametersFor(item->data(0, kAlgIdRole).toString().toStdString());
     }
+}
+
+void MainWindow::applyAlgorithmParameters(const std::string &id, const ParamSet &params)
+{
+    if (m_thread)
+        return;
+    m_paramsById[id] = params;
+    if (m_currentParamAlg == id)
+        m_currentParamAlg.clear(); // force the editor to reload the new values
+    for (int g = 0; g < m_algTree->topLevelItemCount(); ++g) {
+        QTreeWidgetItem *gi = m_algTree->topLevelItem(g);
+        for (int i = 0; i < gi->childCount(); ++i) {
+            QTreeWidgetItem *it = gi->child(i);
+            if (it->data(0, kAlgIdRole).toString().toStdString() != id)
+                continue;
+            if (it->checkState(0) == Qt::Checked)
+                showParametersFor(id);
+            else
+                it->setCheckState(0, Qt::Checked); // selects it and shows its parameters
+            m_algTree->setCurrentItem(it);
+        }
+    }
+    log(tr("Optimized parameters applied: %1").arg(QString::fromStdString(id)));
+}
+
+std::map<std::string, ParamSet> MainWindow::allAlgorithmParameters() const
+{
+    std::map<std::string, ParamSet> all = m_paramsById;
+    if (!m_currentParamAlg.empty())
+        all[m_currentParamAlg] = m_paramEditor->values();
+    return all;
+}
+
+void MainWindow::openOptimization()
+{
+    if (!m_optWindow)
+        m_optWindow = new OptimizationWindow(this);
+    m_optWindow->show();
+    m_optWindow->raise();
+    m_optWindow->activateWindow();
 }
 
 void MainWindow::resetParameters()

@@ -11,6 +11,7 @@
 #include <vector>
 
 class AnalysisWorker;
+class OptimizationWindow;
 class ParameterEditor;
 class RoiPreviewWidget;
 class QCheckBox;
@@ -36,6 +37,14 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+
+    // Current dataset / ROI / preprocessing / registration / algorithm settings.
+    turb::AnalysisConfig currentConfig() const;
+    // Selects the algorithm and loads the given parameters into its editor
+    // (used by the optimization window).
+    void applyAlgorithmParameters(const std::string &id, const turb::ParamSet &params);
+    // Parameters entered in the main window for every algorithm (not only the selected one).
+    std::map<std::string, turb::ParamSet> allAlgorithmParameters() const;
 
 protected:
     void closeEvent(class QCloseEvent *e) override;
@@ -66,6 +75,7 @@ private slots:
     void removeComparisonColumn();
     void clearComparison();
     void renameComparisonColumn(int column);
+    void openOptimization();
 
 private:
     // When false (first phase), checking an algorithm unchecks the others.
@@ -77,7 +87,6 @@ private:
     void populateAlgorithmTree();
 
     bool openDataset(const QString &path, bool loadSidecar);
-    turb::AnalysisConfig currentConfig() const;
     void applyConfig(const turb::AnalysisConfig &c);
     std::vector<std::string> checkedAlgorithmIds() const;
     void showParametersFor(const std::string &id);
@@ -141,6 +150,7 @@ private:
 
     QThread *m_thread = nullptr;
     AnalysisWorker *m_worker = nullptr;
+    OptimizationWindow *m_optWindow = nullptr;
 };
 
 #endif

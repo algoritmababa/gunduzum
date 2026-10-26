@@ -26,10 +26,10 @@ std::vector<ParamSpec> TemporalIntensityVariance::parameterSpecs() const
     return {
         ParamSpec::makeInt("detrend_window", "Detrend window (frames)", 0, 0, 100000,
                            "rms_fluctuation is computed on I(t) minus a centred moving average of this many "
-                           "frames (removes slow illumination drift). 0 = subtract the global mean only."),
+                           "frames (removes slow illumination drift). 0 = subtract the global mean only.").tune(0, 200),
         ParamSpec::makeBool("pixel_statistics", "Per-pixel temporal statistics", true,
                             "Also compute the temporal variance of every ROI pixel (running Welford, ROI-sized "
-                            "buffers only) and report its spatial mean."),
+                            "buffers only) and report its spatial mean.").fixed(),
     };
 }
 
@@ -118,7 +118,7 @@ std::vector<ParamSpec> ScintillationIndex::parameterSpecs() const
                               "NaN; pixels whose temporal mean is below it are excluded from the pixel index."),
         ParamSpec::makeBool("pixel_statistics", "Per-pixel scintillation index", true,
                             "Compute the scintillation index of every ROI pixel (running Welford) and report its "
-                            "spatial mean."),
+                            "spatial mean.").fixed(),
     };
 }
 

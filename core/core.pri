@@ -7,7 +7,7 @@
 #   2. pkg-config "opencv" (3.x) or "opencv4" (4.x).
 #   3. Standard install locations (/usr, /usr/local, /opt/opencv*).
 
-CONFIG += c++11
+CONFIG += c++11 thread
 QMAKE_CXXFLAGS_WARN_ON += -Wall
 
 OPENCV_MODULES = opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio opencv_video
@@ -69,7 +69,9 @@ HEADERS += \
     $$PWD/AlgorithmRegistry.h \
     $$PWD/AnalysisEngine.h \
     $$PWD/ResultExporter.h \
-    $$PWD/algorithms/Algorithms.h
+    $$PWD/algorithms/Algorithms.h \
+    $$PWD/optimization/Separability.h \
+    $$PWD/optimization/ParameterOptimizer.h
 
 SOURCES += \
     $$PWD/Types.cpp \
@@ -83,4 +85,6 @@ SOURCES += \
     $$PWD/ResultExporter.cpp \
     $$PWD/algorithms/IntensityAlgorithms.cpp \
     $$PWD/algorithms/StructureAlgorithms.cpp \
-    $$PWD/algorithms/MotionAlgorithms.cpp
+    $$PWD/algorithms/MotionAlgorithms.cpp \
+    $$PWD/optimization/Separability.cpp \
+    $$PWD/optimization/ParameterOptimizer.cpp
