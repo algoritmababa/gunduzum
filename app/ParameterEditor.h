@@ -8,6 +8,7 @@
 #include <vector>
 
 class QFormLayout;
+class QVBoxLayout;
 
 // Builds editors dynamically from ParamSpec descriptions; knows nothing about
 // individual algorithms.
@@ -28,6 +29,8 @@ signals:
 private:
     void clear();
 
+    QVBoxLayout *m_outer;
+    QWidget *m_content; // rebuilt for every algorithm, owns m_form
     QFormLayout *m_form;
     std::vector<turb::ParamSpec> m_specs;
     std::vector<QWidget *> m_editors;

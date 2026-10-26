@@ -40,7 +40,7 @@ tests/                Bilinen ground-truth'lu sentetik veri ile otomatik testler
 
 ## Derleme
 
-Gereksinimler: Qt 5 (Widgets), OpenCV 3.x (4.x ile de derlenir), C++11 derleyici.
+Gereksinimler: Qt 5.4 veya üstü (Widgets; 5.15 ile test edildi), OpenCV 3.x (4.x ile de derlenir), C++11 derleyici.
 
 ### Qt Creator
 

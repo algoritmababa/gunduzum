@@ -74,10 +74,11 @@ QImage toQImage(const cv::Mat &m)
         u8 = m;
     else
         cv::normalize(m, u8, 0, 255, cv::NORM_MINMAX, CV_8U);
-    if (u8.channels() == 1)
-        return QImage(u8.data, u8.cols, u8.rows, int(u8.step), QImage::Format_Grayscale8).copy();
+    // RGB888 for gray input too: QImage::Format_Grayscale8 needs Qt 5.5
     cv::Mat rgb;
-    if (u8.channels() == 4)
+    if (u8.channels() == 1)
+        cv::cvtColor(u8, rgb, cv::COLOR_GRAY2RGB);
+    else if (u8.channels() == 4)
         cv::cvtColor(u8, rgb, cv::COLOR_BGRA2RGB);
     else
         cv::cvtColor(u8, rgb, cv::COLOR_BGR2RGB);

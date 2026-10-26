@@ -6,22 +6,34 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QSpinBox>
+#include <QVBoxLayout>
 
 #include <climits>
 #include <cmath>
 
 ParameterEditor::ParameterEditor(QWidget *parent)
     : QWidget(parent)
-    , m_form(new QFormLayout(this))
+    , m_outer(new QVBoxLayout(this))
+    , m_content(nullptr)
+    , m_form(nullptr)
 {
-    m_form->setContentsMargins(0, 0, 0, 0);
-    m_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    m_outer->setContentsMargins(0, 0, 0, 0);
+    clear();
 }
 
 void ParameterEditor::clear()
 {
-    while (m_form->rowCount() > 0)
-        m_form->removeRow(0);
+    // Replace the whole form widget instead of removing rows: QFormLayout::removeRow()
+    // only exists since Qt 5.8 and takeAt() leaves empty rows behind.
+    if (m_content) {
+        m_content->hide();
+        m_content->deleteLater();
+    }
+    m_content = new QWidget;
+    m_form = new QFormLayout(m_content);
+    m_form->setContentsMargins(0, 0, 0, 0);
+    m_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    m_outer->addWidget(m_content);
     m_editors.clear();
 }
 
