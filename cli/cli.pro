@@ -3,6 +3,6 @@ CONFIG += console
 CONFIG -= qt app_bundle
 TARGET = turbulence_cli
 
-include(../core_link.pri)
+include(../core/core.pri)
 
 SOURCES += main.cpp

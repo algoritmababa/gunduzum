@@ -19,9 +19,9 @@ DATASET → FRAME READING → PREPROCESSING (ROI ilk adım) → REGISTRATION →
 ## Proje yapısı
 
 ```
-turbulence.pro        qmake subdirs (core, app, cli, tests)
-common.pri            OpenCV bulma, C++11
-core/                 Analiz çekirdeği: saf C++11 + OpenCV (Qt bağımlılığı yok, statik kütüphane)
+TurbulenceAnalysis.pro  GUI uygulamasının TEK qmake projesi (tüm kaynaklar + OpenCV ayarı)
+core/                 Analiz çekirdeği: saf C++11 + OpenCV (Qt bağımlılığı yok)
+  core.pri              cli/ ve tests/ için OpenCV ayarı + core kaynakları
   Types.*               Roi, ParamSpec/ParamSet, Feature, AlgorithmResult
   FrameSource.*         Görüntü klasörü (natural sort) / video; sıralı okuma, cache yok
   Preprocessor.*        ROI crop → grayscale → float → denoise → contrast → normalization
@@ -42,24 +42,40 @@ tests/                Bilinen ground-truth'lu sentetik veri ile otomatik testler
 
 Gereksinimler: Qt 5 (Widgets), OpenCV 3.x (4.x ile de derlenir), C++11 derleyici.
 
+### Qt Creator
+
+**File → Open File or Project…** ile kökteki **`TurbulenceAnalysis.pro`** dosyasını açın,
+bir Qt 5 kiti seçin ve **Run** (Ctrl+R) yapın. Başka proje dosyası gerekmez.
+
+### Komut satırı
+
 ```bash
 mkdir build && cd build
-qmake ../turbulence.pro            # pkg-config "opencv" (3.x) veya "opencv4" bulunursa
+qmake ../TurbulenceAnalysis.pro
 make -j
+./TurbulenceAnalysis
 ```
 
-pkg-config yoksa (ör. Windows) yolları elle verin:
+OpenCV sırasıyla şöyle aranır: qmake argümanı → pkg-config (`opencv` / `opencv4`) →
+standart dizinler (`/usr/local`, `/usr`, `/opt/opencv*`). Bulunan ayar qmake çıktısında
+`Project MESSAGE: OpenCV: ...` satırında görünür. Bulunamazsa yolları elle verin
+(Qt Creator: **Projects → Build → qmake → Additional arguments**):
 
 ```bash
-qmake ../turbulence.pro OPENCV_INCLUDE_DIR=C:/opencv/build/include \
-      OPENCV_LIB_DIR=C:/opencv/build/x64/vc15/lib OPENCV_LIB_SUFFIX=341
+qmake ../TurbulenceAnalysis.pro OPENCV_INCLUDE_DIR=/opt/opencv/include \
+      OPENCV_LIB_DIR=/opt/opencv/lib
+# Windows örneği: OPENCV_INCLUDE_DIR=C:/opencv/build/include
+#                 OPENCV_LIB_DIR=C:/opencv/build/x64/vc15/lib OPENCV_LIB_SUFFIX=341
 ```
 
 Kullanılan OpenCV modülleri: core, imgproc, imgcodecs, videoio, video.
 Kod yalnızca OpenCV 3.x'te bulunan API'leri kullanır (`cv::` C++ API, `cv::COLOR_*`,
 `cv::CAP_PROP_*` …); OpenCV 2.x C API'si ve OpenCV 4.x'e özgü API kullanılmaz.
 
-Çıktılar: `app/TurbulenceAnalysis` (GUI), `cli/turbulence_cli`, `tests/turbulence_tests`.
+### İsteğe bağlı: CLI ve testler
+
+Bunlar ayrı, bağımsız projelerdir (GUI için gerekmez); aynı şekilde açılıp derlenir:
+`cli/cli.pro` → `turbulence_cli`, `tests/tests.pro` → `turbulence_tests`.
 
 ## GUI kullanımı
 
