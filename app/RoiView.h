@@ -1,22 +1,22 @@
-#ifndef ROIPREVIEWWIDGET_H
-#define ROIPREVIEWWIDGET_H
+#ifndef ROIVIEW_H
+#define ROIVIEW_H
 
 #include <QImage>
 #include <QRect>
 #include <QWidget>
 
-// Shows one dataset frame (scaled to fit) with the ROI rectangle on top.
-// Dragging with the left mouse button defines a new ROI in image coordinates.
-class RoiPreviewWidget : public QWidget
+// Shows a frame scaled to fit with the ROI on top; dragging with the left mouse button
+// selects a new ROI (image coordinates).
+class RoiView : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit RoiPreviewWidget(QWidget *parent = nullptr);
+    explicit RoiView(QWidget *parent = nullptr);
 
     void setImage(const QImage &image);
     void setRoi(const QRect &roi); // empty = full frame
-    QSize sizeHint() const override { return QSize(480, 360); }
+    QSize sizeHint() const override { return QSize(640, 480); }
 
 signals:
     void roiSelected(const QRect &roi);
@@ -29,12 +29,12 @@ protected:
 
 private:
     QRectF imageRect() const;
-    QPoint toImage(const QPoint &widgetPos) const;
+    QPoint toImage(const QPoint &p) const;
 
     QImage m_image;
     QRect m_roi;
     bool m_dragging = false;
-    QPoint m_dragStart, m_dragEnd;
+    QPoint m_from, m_to;
 };
 
 #endif

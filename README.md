@@ -1,239 +1,97 @@
-# Atmospheric Turbulence Image Analysis Platform
+# Turbulence Measurement (minimal sürüm)
 
-C++ / Qt Widgets / OpenCV 3.x tabanlı, **görüntüden türetilen feature araştırma platformu**.
-Sabit bir hedefe ait frame setlerinde klasik görüntü işleme algoritmalarını çalıştırır ve
-sonuçları yalnızca **sayısal** olarak (tablo, CSV, JSON) üretir.
+Sabit bir hedefin görüntülerinden, atmosferik türbülansın üç görünür etkisini ölçen küçük bir
+**ölçüm aracı**. Karar vermez; her kaydı aynı şekilde ölçer ve sonucu ortak bir tabloya yazar.
+Çalışmanın bütünü (aşamalar, geçiş kriterleri, çekim protokolü) [CALISMA_PLANI.md](CALISMA_PLANI.md)
+belgesinde.
 
-> Bu uygulama bir "turbulence meter" değildir. Otomatik LOW/MEDIUM/HIGH kararı, sabit
-> eşik değerleri ve grafik/plot **bilinçli olarak yoktur**. Amaç: atmosferik koşul değiştiğinde
-> hangi feature'ların anlamlı, tekrarlanabilir ve ayırt edici şekilde değiştiğini bulmak.
-> Etiketli veri varsa, hangi algoritma ve parametrelerin kategorileri en iyi ayırdığı
-> **Parametre optimizasyonu** penceresiyle aranabilir (aşağıya bakın).
+> Önceki kapsamlı sürüm (8 algoritma, ön işleme, registration, parametre optimizasyonu)
+> `v1-full` etiketinde / `e6d0584` commit'inde duruyor.
 
-## İş akışı
+## Ne ölçer?
+
+| Etki | Ölçüm (kare başına) | Pencere özeti |
+|---|---|---|
+| Kayma / titreşim | **jitter**: ardışık iki kare arasındaki kayma (phase correlation, alt-piksel) | `jitter_mean`, `jitter_std`, `jitter_p95` |
+| Bulanıklık | **sharpness**: ROI'nin Laplacian varyansı | `sharpness_mean`, `sharpness_std`, `sharpness_p95` |
+| Parlaklık dalgalanması | **intensity**: ROI ortalama parlaklığı | `intensity_mean`, `intensity_std`, `intensity_p95`, `scintillation_index` (Var/Mean²) |
+
+Ön işleme yok: yalnızca ROI kırpma ve gri tonlama. Ayar yok: herkes aynı ölçümü yapar.
+
+## Kullanım
+
+1. **Recording**: görüntü klasörü veya video aç.
+2. **Label**: kategori (LOW / MEDIUM / HIGH veya yeni bir ad; boş = etiketsiz) ve not
+   (saat, hava, pozlama…).
+3. **ROI**: görüntü üzerinde sürükle (kayıt bazında hatırlanır).
+4. **Measurement**: pencere uzunluğu (0 = tüm kayıt tek pencere) ve sonuç dosyası.
+5. **RUN** → her pencere sonuç dosyasına bir satır olarak **eklenir**.
+
+Sekmeler: **Results** (sonuç dosyasının içeriği), **Category summary** (her ölçüm için kategori
+bazında ortalama ± std, LOW→HIGH yönünde *trend* ve komşu kategorilerin *ayrışması*), **Log**.
+
+İsteğe bağlı: "Also save per-frame values" ile kare bazında değerler ayrı bir CSV'ye yazılır.
+
+## Sonuç tablosu (ortak veri sözleşmesi)
 
 ```
-DATASET → FRAME READING → PREPROCESSING (ROI ilk adım) → REGISTRATION → ALGORITHM
-        → FEATURE EXTRACTION → STATISTICAL SUMMARY → RESULT TABLE → CSV / JSON
-        → DATASET COMPARISON (run'lar yan yana, feature matrix CSV)
+recording, category, note, source, window, start_frame, end_frame, frames,
+roi_x, roi_y, roi_w, roi_h, measured_at,
+jitter_mean, jitter_std, jitter_p95, sharpness_mean, sharpness_std, sharpness_p95,
+intensity_mean, intensity_std, intensity_p95, scintillation_index
 ```
 
-## Proje yapısı
-
-```
-TurbulenceAnalysis.pro  GUI uygulamasının TEK qmake projesi (tüm kaynaklar + OpenCV ayarı)
-core/                 Analiz çekirdeği: saf C++11 + OpenCV (Qt bağımlılığı yok)
-  core.pri              cli/ ve tests/ için OpenCV ayarı + core kaynakları
-  Types.*               Roi, ParamSpec/ParamSet, Feature, AlgorithmResult
-  FrameSource.*         Görüntü klasörü (natural sort) / video; sıralı okuma, cache yok
-  Preprocessor.*        ROI crop → grayscale → float → denoise → contrast → normalization
-  Registration.*        None / Translation (phaseCorrelate) / Affine (findTransformECC)
-  ReferenceFrame.*      First / Previous / Fixed / Average referans yönetimi
-  Algorithm.h           Algoritma arayüzü (çok geçişli, sıralı)
-  AlgorithmRegistry.*   Tüm algoritmaların listesi (GUI/CLI buradan okur)
-  AnalysisEngine.*      Pipeline, ilerleme callback'i, iptal
-  Statistics.*          mean/variance/std/RMS/min/max/P95, per-pixel Welford
-  ResultExporter.*      Frame CSV, summary CSV, JSON, karşılaştırma CSV, feature matrix CSV
-  algorithms/           8 algoritma
-  optimization/         Etiketli veriyle parametre optimizasyonu ve algoritma seçimi
-    Separability.*        Fisher oranı, kayıt bazlı çapraz doğrulamalı nearest-centroid
-    ParameterOptimizer.*  Pencereleme, coarse-to-fine arama, recursive algoritma eleme
-app/                  Qt Widgets GUI (worker thread, dinamik tablolar, ROI seçimi, optimizasyon penceresi)
-cli/                  Komut satırı (batch / script)
-tests/                Bilinen ground-truth'lu sentetik veri ile otomatik testler
-```
+Bir satır = bir kaydın bir penceresi. Tüm çalıştırmalar aynı dosyaya eklenir; analiz uygulamada
+(kategori özeti) veya Excel / Python / MATLAB ile yapılabilir. Sütunları farklı bir dosyaya ekleme
+reddedilir.
 
 ## Derleme
 
-Gereksinimler: Qt 5.4 veya üstü (Widgets; 5.15 ile test edildi), OpenCV 3.x (4.x ile de derlenir), C++11 derleyici.
+Gereksinimler: Qt 5.4+ (Widgets), OpenCV 3.x (4.x ile de derlenir), C++11.
 
-### Qt Creator
+**Qt Creator:** `TurbulenceAnalysis.pro` dosyasını aç → Qt 5 kiti → Run.
 
-**File → Open File or Project…** ile kökteki **`TurbulenceAnalysis.pro`** dosyasını açın,
-bir Qt 5 kiti seçin ve **Run** (Ctrl+R) yapın. Başka proje dosyası gerekmez.
+OpenCV sırasıyla aranır: qmake argümanı → pkg-config (`opencv` / `opencv4`) → standart dizinler.
+Bulunamazsa: **Projects → Build → qmake → Additional arguments**:
+`OPENCV_INCLUDE_DIR=/yol/include OPENCV_LIB_DIR=/yol/lib`.
 
-### Komut satırı
+İsteğe bağlı projeler:
 
-```bash
-mkdir build && cd build
-qmake ../TurbulenceAnalysis.pro
-make -j
-./TurbulenceAnalysis
+* `cli/cli.pro` → `turbulence_measure` (toplu ölçüm, aynı tabloya yazar):
+  ```bash
+  turbulence_measure --input /veri/kayit1 --category LOW --roi 100,100,400,300 \
+                     --window 300 --results results.csv
+  turbulence_measure --summary results.csv
+  ```
+* `tests/tests.pro` → `turbulence_tests`: sentetik verilerle doğrulama (bilinen kayma, blur,
+  parlaklık dalgalanması; pencereleme, CSV, kategori özeti).
+
+## Kod yapısı (~2.000 satır; önceki sürüm ~8.400)
+
+```
+core/   saf C++11 + OpenCV
+  FrameSource    klasör / video, sırayla kare okuma (bellekte yalnızca o anki kare)
+  Metrics        Metric arayüzü + jitter / sharpness / intensity
+  Measurement    kayıt → pencereler → özet (ROI + gri tonlama, iptal, ilerleme)
+  ResultTable    ortak CSV tablosu, kategori özeti
+  Stats          mean / std / P95
+app/    Qt arayüzü (MainWindow, MeasureWorker, RoiView)
+cli/    komut satırı
+tests/  otomatik testler
 ```
 
-OpenCV sırasıyla şöyle aranır: qmake argümanı → pkg-config (`opencv` / `opencv4`) →
-standart dizinler (`/usr/local`, `/usr`, `/opt/opencv*`). Bulunan ayar qmake çıktısında
-`Project MESSAGE: OpenCV: ...` satırında görünür. Bulunamazsa yolları elle verin
-(Qt Creator: **Projects → Build → qmake → Additional arguments**):
+**Yeni ölçüm eklemek:** `Metric`'ten türeyen bir sınıf (`name`, `description`, `reset`, `process`)
+yazıp `createMetrics()` içine bir satır eklemek yeterli; tabloya sütunları, arayüze açıklaması ve
+kategori özetine satırları otomatik gelir. (Sütunlar değiştiği için yeni bir sonuç dosyası
+başlatılmalıdır.)
 
-```bash
-qmake ../TurbulenceAnalysis.pro OPENCV_INCLUDE_DIR=/opt/opencv/include \
-      OPENCV_LIB_DIR=/opt/opencv/lib
-# Windows örneği: OPENCV_INCLUDE_DIR=C:/opencv/build/include
-#                 OPENCV_LIB_DIR=C:/opencv/build/x64/vc15/lib OPENCV_LIB_SUFFIX=341
-```
+## Bilinen sınırlar
 
-Kullanılan OpenCV modülleri: core, imgproc, imgcodecs, videoio, video.
-Kod yalnızca OpenCV 3.x'te bulunan API'leri kullanır (`cv::` C++ API, `cv::COLOR_*`,
-`cv::CAP_PROP_*` …); OpenCV 2.x C API'si ve OpenCV 4.x'e özgü API kullanılmaz.
-
-### İsteğe bağlı: CLI ve testler
-
-Bunlar ayrı, bağımsız projelerdir (GUI için gerekmez); aynı şekilde açılıp derlenir:
-`cli/cli.pro` → `turbulence_cli`, `tests/tests.pro` → `turbulence_tests`.
-
-## GUI kullanımı
-
-1. **Dataset**: görüntü klasörü veya video açın. Frame rate (timestamp için), frame aralığı ve adım.
-2. **ROI**: önizlemede sürükleyerek veya x/y/w/h ile. "show preprocessed ROI" ile ön işleme sonucunu görün.
-3. **Preprocessing**: denoise (Gaussian/Median/Bilateral), contrast (HistEq/CLAHE), normalization.
-4. **Registration**: None / Translation / Affine; referans First / Previous / Fixed.
-5. **Algorithm**: tek algoritma seçilir (SINGLE ALGORITHM MODE). Parametre formu algoritmanın
-   `ParamSpec` listesinden otomatik oluşturulur.
-6. **RUN**: analiz ayrı bir `QThread` üzerinde çalışır; GUI'ye yalnızca progress, frame no,
-   durum, sonuç ve hata sinyalleri gelir (≈20 Hz ile sınırlandırılmış). Cancel desteklenir.
-
-Sekmeler:
-
-* **Summary** – algoritmanın döndürdüğü feature listesi (isim/değer/birim/anahtar) ve feature vector.
-  Export: frame-level CSV, summary CSV (`feature,value`), JSON.
-* **Run info** – metadata (dataset, ROI, preprocessing, registration, parametreler, süre, OpenCV sürümü) ve uyarılar.
-* **Dataset comparison** – her run bir sütun; başlığa çift tıklayarak koşul etiketi verin
-  (ör. "öğle, 14:00, güneşli"). Comparison CSV ve feature matrix CSV (her run bir satır –
-  ileride feature selection / classifier girdisi).
-
-**Save dataset config**: ROI, preprocessing, registration, aralık ve algoritma parametreleri
-veri setinin yanına kaydedilir (`<klasör>/turbulence_dataset.json` veya `<video>.turbulence.json`)
-ve dataset açılınca otomatik yüklenir.
-
-## CLI
-
-```bash
-turbulence_cli --list
-turbulence_cli --params phase_correlation
-turbulence_cli --dataset /data/run_0930 --algorithm phase_correlation \
-    --roi 100,100,400,300 --fps 100 --param reference=1 --out results/run_0930
-# → results/run_0930_phase_correlation_frames.csv, ..._summary.csv, results/run_0930.json
-```
-
-Birden fazla `--algorithm` verilirse aynı frame akışında bağımsız çalışırlar (multiple mode).
-
-## Algoritmalar
-
-Tüm istatistikler popülasyon istatistiğidir (N'e bölünür). P95 lineer interpolasyonlu yüzdeliktir.
-NaN değerler istatistiklere katılmaz; CSV'de `NaN`, JSON'da `null` yazılır.
-
-| # | Algoritma | Frame-level seri | Öne çıkan feature'lar |
-|---|-----------|------------------|------------------------|
-| 1 | Temporal Intensity Variance | I(t) = ROI ortalaması, I(t)−I(t−1) | mean/var/std, detrend edilmiş RMS fluctuation, P95, ortalama \|ΔI\|, var(ΔI), piksel bazlı zamansal varyans |
-| 2 | Scintillation Index | I(t), (I−Ī)/Ī | SI = Var(I)/Mean(I)², RMS/P95 normalize fluctuation, piksel bazlı ortalama SI (sıfıra bölme korumalı) |
-| 3 | Laplacian Variance | var(∇²I) | mean/var/std/RMS/min/max/P95 sharpness, ortalama \|ΔS\|, CV |
-| 4 | Gradient Magnitude Variance | ortalama \|∇I\| (Sobel), uzaysal var(\|∇I\|) | G(t) istatistikleri, temporal gradient variation, ortalama uzaysal gradient varyansı |
-| 5 | Phase Correlation | dx, dy, \|d\|, peak response | mean/std/RMS dx-dy, mean/std/RMS/max/P95 displacement, valid ratio |
-| 6 | Centroid Jitter | Cx, Cy, alan, ΔX, ΔY, J | centroid mean/std, jitter mean/std/RMS/max/P95, frame-to-frame jitter, alan, tespit oranı |
-| 7 | Optical Flow (pyramidal LK) | takip edilen/geçerli vektör, ortalama akış | flow mean/var/std/RMS/max/P95, mean/std Fx-Fy, valid vector ratio |
-| 8 | Image Structure Analysis | MAD, MSD, \|I_t−I_(t−1)\|, uzaysal var, P95/max fark, korelasyon | MAD, MSD, RMS fark, uzaysal/zamansal varyans, P95/max fark, referans korelasyonu |
-
-Referans seçenekleri (5 ve 8): First / Previous / Fixed / Average. Fixed ve Average için
-ön bir geçiş yapılır (yalnızca referans görüntü veya toplam görüntü tutulur). Centroid Jitter'da
-referans: ilk geçerli frame / ortalama centroid / sabit frame. Optical Flow: Previous (her frame'de
-yeniden feature tespiti) veya First (ilk frame'den takip).
-
-Her algoritma ayrıca bir **feature vector** (classifier'a ileride verilebilecek alt küme) tanımlar;
-GUI'de gösterilir, JSON'a ve feature matrix CSV'ye yazılır.
-
-## Performans / bellek
-
-* Frame'ler sıralı okunur; RAM'de yalnızca o anki frame + gerekiyorsa tek referans tutulur.
-* ROI ilk adımda uygulanır (yalnızca Mat header, kopya yok); sonraki tüm işlemler ROI üzerinde.
-* Tamponlar frame'ler arasında yeniden kullanılır.
-* Ölçüm (640×480 MJPG video, 6000 frame, ROI 400×300, tek çekirdek): yoğunluk/Laplacian/gradient
-  ≈ 10 s, phase correlation ≈ 36 s, optical flow ≈ 36 s, structure ≈ 48 s; tepe RSS ≈ 80 MB ve
-  frame sayısından bağımsız.
-
-## Araştırma açısından önemli notlar
-
-* **`cv::phaseCorrelate` girdilerini değiştirir**: görüntü boyutu DFT için zaten optimal ise
-  pencere (Hanning) girdilere *yerinde* çarpılır (OpenCV 3.x ve 4.x). Saklanan referans frame
-  bozulmasın diye `phaseCorrelateSafe()` kopyalar üzerinde çalışır.
-* **Hanning penceresi sub-pixel kestirimi sıfıra doğru yanlılar** (pencere ROI'ye sabit). Sentetik
-  testte maksimum hata pencere ile ≈0.34 px, pencere olmadan ≈0.19 px. Küçük jitter
-  ölçümlerinde `hanning=0` denemesi önerilir.
-* **İkili maske centroid'i piksele kilitlenir** (~0.5 px kuantizasyon). Varsayılan ağırlıklandırma
-  "Intensity weighted" (w = max(I − eşik, 0)); sentetik testte hata < 0.06 px.
-* **Registration ROI içinde tahmin edilir**: kamera hareketiyle birlikte türbülansın neden olduğu
-  tüm-ROI tilt'ini de siler. Displacement/centroid analizlerinde dikkatli kullanın.
-* **Per-frame normalization** (min/max, z-score) mutlak yoğunluk dalgalanmasını yok eder;
-  yoğunluk/scintillation feature'ları bu durumda uyarı notu üretir.
-
-## Parametre optimizasyonu (etiketli veri)
-
-**Tools → Parameter optimization (labeled data)…** veya Run panelindeki butonla açılır.
-Üç kategoriye (varsayılan adlar LOW / MEDIUM / HIGH, değiştirilebilir) ayrılmış kayıtlar
-(görüntü klasörleri veya videolar) üzerinde, kategorileri en iyi ayıran algoritmaları ve
-parametreleri arar.
-
-**Örnekler.** Feature'lar zamansal istatistik olduğu için örnek tek görüntü değil, bir
-**kare penceresidir**: her kayıt `Window length` karelik pencerelere bölünür, her pencere bir
-etiketli örnektir (`Max windows / recording` ile kayıt boyunca eşit aralıklı seçilir).
-Her kaydın ROI'si, varsa kendi dataset config dosyasından (`turbulence_dataset.json`), yoksa
-ana pencereden alınır. Preprocessing ve registration ana penceredeki ayarlardır.
-
-**Amaç fonksiyonu.** Varsayılan: çapraz doğrulamalı **dengeli doğruluk** (z-score edilmiş
-feature'lar üzerinde nearest-centroid), eşitlikte en iyi 3 feature'ın **Fisher oranı**
-(sınıflar arası / sınıf içi varyans) belirleyici. Alternatif: yalnızca Fisher oranı. Her kategoride
-en az 2 kayıt varsa doğrulama **kayıt bazlıdır** (leave-one-recording-out); aynı kaydın
-pencereleri birbirine benzediği için pencere bazlı doğrulama iyimser sonuç verir ve bu durumda
-uyarı yazılır.
-
-**Recursive arama.**
-1. *Parametreler* (her algoritma için, koordinat bazlı): seviye 0'da her optimize edilebilir parametre
-   tek tek taranır — Choice/Bool parametrelerin tüm değerleri, sayısal parametrelerin arama aralığında
-   `Grid points` kadar değer. Sonraki her seviyede sayısal aralıklar en iyi değerin etrafına (bir ızgara
-   adımı) daraltılıp tarama tekrarlanır (`Refinement levels` = özyineleme derinliği). Arama aralıkları
-   algoritmaların `ParamSpec::tune()` tanımlarından gelir; veriye bağlı parametreler (eşik değeri,
-   sabit referans karesi vb.) sabit tutulur.
-2. *Algoritma seçimi* (recursive elimination): optimize edilmiş tüm algoritmaların feature'ları
-   birleştirilir; her adımda çıkarılması birleşik skoru en az düşüren algoritma elenir. En yüksek
-   skorlu küme (eşitlikte daha küçük olan) seçilir.
-
-**Hız.** Aynı adımdaki tüm aday parametre setleri tek veri geçişinde birlikte çalışır (her pencere
-geçiş başına bir kez okunur), pencereler CPU çekirdeklerine paralel dağıtılır, aynı parametre seti
-iki kez hesaplanmaz. `Max evaluations` toplam bütçeyi sınırlar. Uzun kayıtlarda önce kısa pencere,
-az pencere ve `Frame step` ile kaba bir arama yapmak önerilir.
-
-**Sonuçlar.** *Algorithm ranking* (skor, başlangıç → en iyi doğruluk, en ayırt edici feature,
-en iyi parametreler), *Feature separation* (her feature'ın Fisher oranı ve kategori bazında
-ortalama ± std, karışıklık matrisi, arama geçmişi), *Algorithm selection* (eleme adımları), *Log*.
-"Apply selected…" seçili algoritmayı ve parametrelerini ana pencereye aktarır. Rapor JSON'a,
-pencere bazlı feature'lar (her algoritmanın en iyi parametreleriyle) CSV'ye aktarılabilir. Kurulum
-(kategoriler, kayıtlar, ayarlar) JSON olarak kaydedilip yüklenebilir.
-
-> Uyarı: parametreler aynı doğrulama ile seçildiği için (iç içe doğrulama yok) raporlanan doğruluk
-> iyimserdir. Seçilen yapılandırmayı optimizasyonda kullanılmamış kayıtlarla doğrulayın.
-
-## Testler
-
-```bash
-tests/turbulence_tests [çalışma_klasörü]
-```
-
-Bilinen sub-pixel kaydırma, kazanç ve blur ile sentetik 16-bit görüntü dizileri üretir ve
-şunları doğrular: istatistik fonksiyonları, natural sort, phase correlation (tüm referans modları),
-translation/affine registration, centroid (binary/Otsu/adaptive, ROI offset), optical flow,
-yoğunluk/scintillation formülleri ve sıfıra bölme koruması, blur ile Laplacian/gradient düşüşü,
-structure analysis, multiple-algorithm modu, frame aralığı/adımı, exporter'lar ve iptal;
-ayrıca Fisher oranı / çapraz doğrulama ve 3 kategorili sentetik veride optimizer (pencereleme,
-kayıt bazlı doğrulama, bütçe, recursive eleme, iptal).
-
-## Genişletme
-
-Yeni algoritma: `turb::Algorithm`'dan türetin (`parameterSpecs()`, `begin()`, `processFrame()`,
-`finish()`), `AlgorithmRegistry` kurucusuna `add<YeniAlgoritma>(öncelik)` ekleyin. GUI parametre
-formu, sonuç tablosu, CSV/JSON çıktıları ve karşılaştırma tablosu otomatik olarak çalışır.
-Parametrelerine `.tune(min, max[, log])` ile arama aralığı verilirse (Choice/Bool parametreler
-varsayılan olarak, `.fixed()` ile hariç tutulabilir) optimizasyon penceresi de onları otomatik arar.
-
-Multiple algorithm mode motor tarafında hazırdır (`AnalysisConfig::algorithms` birden çok giriş
-alır, her frame geçiş başına bir kez çözülür); GUI'de `MainWindow::kAllowMultipleAlgorithms`
-ile açılır.
+* **jitter**, ROI'nin bütününün kaymasını ölçer; kamera/platform titreşimi de buna dahildir.
+  Hanning penceresi alt-piksel kestirimini sıfıra doğru yanlılar (sentetik testte büyük
+  kaymalarda en fazla ~0.5 px).
+* **sharpness** sahnenin kontrastına ve ışığa bağlıdır; farklı ışık koşullarındaki kayıtları
+  karşılaştırırken dikkat.
+* **scintillation_index** nokta kaynakta en anlamlıdır; geniş ROI'de ortalama alma etkisi
+  dalgalanmayı azaltır. Kameranın otomatik pozlaması kapalı olmalıdır.
+* Pencere uzunluğuna tam bölünmeyen kalan kareler atılır.

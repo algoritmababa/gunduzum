@@ -6,7 +6,7 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("TurbulenceLab");
-    QApplication::setApplicationName("TurbulenceAnalysis");
+    QApplication::setApplicationName("TurbulenceMeasurement");
 
     MainWindow w;
     w.show();

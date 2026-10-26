@@ -59,32 +59,15 @@ isEmpty(OPENCV_INCLUDE_DIR) {
 INCLUDEPATH += $$PWD
 
 HEADERS += \
-    $$PWD/Types.h \
-    $$PWD/Statistics.h \
     $$PWD/FrameSource.h \
-    $$PWD/Preprocessor.h \
-    $$PWD/Registration.h \
-    $$PWD/ReferenceFrame.h \
-    $$PWD/Algorithm.h \
-    $$PWD/AlgorithmRegistry.h \
-    $$PWD/AnalysisEngine.h \
-    $$PWD/ResultExporter.h \
-    $$PWD/algorithms/Algorithms.h \
-    $$PWD/optimization/Separability.h \
-    $$PWD/optimization/ParameterOptimizer.h
+    $$PWD/Stats.h \
+    $$PWD/Metrics.h \
+    $$PWD/Measurement.h \
+    $$PWD/ResultTable.h
 
 SOURCES += \
-    $$PWD/Types.cpp \
-    $$PWD/Statistics.cpp \
     $$PWD/FrameSource.cpp \
-    $$PWD/Preprocessor.cpp \
-    $$PWD/Registration.cpp \
-    $$PWD/ReferenceFrame.cpp \
-    $$PWD/AlgorithmRegistry.cpp \
-    $$PWD/AnalysisEngine.cpp \
-    $$PWD/ResultExporter.cpp \
-    $$PWD/algorithms/IntensityAlgorithms.cpp \
-    $$PWD/algorithms/StructureAlgorithms.cpp \
-    $$PWD/algorithms/MotionAlgorithms.cpp \
-    $$PWD/optimization/Separability.cpp \
-    $$PWD/optimization/ParameterOptimizer.cpp
+    $$PWD/Stats.cpp \
+    $$PWD/Metrics.cpp \
+    $$PWD/Measurement.cpp \
+    $$PWD/ResultTable.cpp

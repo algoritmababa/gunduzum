@@ -1,7 +1,7 @@
-# Atmospheric Turbulence Image Analysis Platform - GUI application.
+# Turbulence measurement tool - GUI application (minimal backbone version).
 #
 # Single, self-contained qmake project: open this file in Qt Creator and press Run.
-# All analysis-core and GUI sources are compiled directly into the application.
+# All core and GUI sources are compiled directly into the application.
 #
 # OpenCV discovery (OpenCV 3.x is the target; 4.x also builds), in this order:
 #   1. Explicit paths:  qmake OPENCV_INCLUDE_DIR=... OPENCV_LIB_DIR=... [OPENCV_LIB_SUFFIX=...]
@@ -71,52 +71,27 @@ INCLUDEPATH += $$PWD/core $$PWD/app
 
 # Analysis core (pure C++11 + OpenCV, no Qt)
 HEADERS += \
-    core/Types.h \
-    core/Statistics.h \
     core/FrameSource.h \
-    core/Preprocessor.h \
-    core/Registration.h \
-    core/ReferenceFrame.h \
-    core/Algorithm.h \
-    core/AlgorithmRegistry.h \
-    core/AnalysisEngine.h \
-    core/ResultExporter.h \
-    core/algorithms/Algorithms.h \
-    core/optimization/Separability.h \
-    core/optimization/ParameterOptimizer.h
+    core/Stats.h \
+    core/Metrics.h \
+    core/Measurement.h \
+    core/ResultTable.h
 
 SOURCES += \
-    core/Types.cpp \
-    core/Statistics.cpp \
     core/FrameSource.cpp \
-    core/Preprocessor.cpp \
-    core/Registration.cpp \
-    core/ReferenceFrame.cpp \
-    core/AlgorithmRegistry.cpp \
-    core/AnalysisEngine.cpp \
-    core/ResultExporter.cpp \
-    core/algorithms/IntensityAlgorithms.cpp \
-    core/algorithms/StructureAlgorithms.cpp \
-    core/algorithms/MotionAlgorithms.cpp \
-    core/optimization/Separability.cpp \
-    core/optimization/ParameterOptimizer.cpp
+    core/Stats.cpp \
+    core/Metrics.cpp \
+    core/Measurement.cpp \
+    core/ResultTable.cpp
 
 # Qt Widgets GUI
 HEADERS += \
     app/MainWindow.h \
-    app/AnalysisWorker.h \
-    app/ParameterEditor.h \
-    app/RoiPreviewWidget.h \
-    app/DatasetConfig.h \
-    app/OptimizationWorker.h \
-    app/OptimizationWindow.h
+    app/MeasureWorker.h \
+    app/RoiView.h
 
 SOURCES += \
     app/main.cpp \
     app/MainWindow.cpp \
-    app/AnalysisWorker.cpp \
-    app/ParameterEditor.cpp \
-    app/RoiPreviewWidget.cpp \
-    app/DatasetConfig.cpp \
-    app/OptimizationWorker.cpp \
-    app/OptimizationWindow.cpp
+    app/MeasureWorker.cpp \
+    app/RoiView.cpp
