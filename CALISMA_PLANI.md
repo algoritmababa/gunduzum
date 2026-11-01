@@ -59,8 +59,13 @@ Uygulamadaki **Trend analysis** sekmesi (ANALYZE) bu aşamanın aracıdır. Kay�
 - bu eğilim tesadüf olabilir mi? (Spearman ρ, permütasyon testi, Holm düzeltmesi)
 - LOW–HIGH farkı, kategori içi yayılıma göre ne kadar büyük? (d)
 
-**Geçiş:** Verdict = *consistent increase* veya *consistent decrease*. Kategori başına en az 3 kayıt
-gerekir; daha azıyla analiz "insufficient data" veya "not significant" der.
+**Keşif (kategori başına 1 kayıt):** analiz çalışır, yönü *Increase / Decrease (untested)* olarak
+gösterir; yayılım kayıtların pencerelerinden hesaplanır. Ölçümleri ve aracı denemek, umut veren
+ölçümleri seçmek için yeterlidir.
+
+**Geçiş:** Verdict = *consistent increase* veya *consistent decrease*. Bunun için kategori başına
+yaklaşık 3 kayıt gerekir (2 kayıtla test yapılır ama 10 ölçüm birlikte test edildiği için anlamlı
+sonuç çıkamaz).
 
 ## Aşama 4 — Sağlamlık
 **Soru:** Değişimin sebebi gerçekten türbülans mı?
@@ -81,7 +86,8 @@ belirlenmez.
 
 ## İlk adım (önerilen)
 1. Alt çalışma A (jitter) ile başla.
-2. Protokolle 3 kategori × 3 kayıt + 1 referans kayıt topla.
+2. Önce kategori başına 1 kayıtla aracı ve ölçümleri dene (keşif); sonra protokolle
+   3 kategori × 3 kayıt + 1 referans kayıt topla.
 3. Hepsini aynı sonuç dosyasına ölç (aynı ROI, aynı pencere uzunluğu).
 4. Aşama 2 → 3 → 4'ü jitter için uygula; sonra B ve C.
 

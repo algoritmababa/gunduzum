@@ -21,6 +21,7 @@ const char *verdictName(TrendVerdict v)
     case TrendVerdict::ConsistentDecrease: return "consistent decrease";
     case TrendVerdict::SignificantNotMonotonic: return "significant, not monotonic";
     case TrendVerdict::NotSignificant: return "ordered, not significant";
+    case TrendVerdict::OrderedUntested: return "ordered, not tested";
     case TrendVerdict::NoTrend: return "no consistent trend";
     case TrendVerdict::InsufficientData: return "insufficient data";
     }
@@ -181,6 +182,7 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
                                                                                          : nan());
             }
             rep.unitList[u].value = vals;
+            rep.unitList[u].windowValues = acc[u];
             unitValues.push_back(vals);
         }
     }
@@ -198,12 +200,17 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
         rep.minPossibleP = std::max(1.0 / std::max(1.0, arrangements / 2.0), // |rho| is symmetric
                                     1.0 / (opt.permutations + 1.0));
     }
-    const bool enough = *std::min_element(rep.unitsPerCategory.begin(), rep.unitsPerCategory.end()) >= 2;
-    if (!enough)
-        rep.notes.push_back("Every category needs at least 2 " +
-                            std::string(opt.perRecording ? "recordings" : "windows") +
-                            " to judge the spread inside the category.");
-    if (rep.minPossibleP > opt.alpha)
+    rep.testable = *std::min_element(rep.unitsPerCategory.begin(), rep.unitsPerCategory.end()) >= 2;
+    const bool windowSpread = opt.perRecording && !rep.testable;
+    if (!rep.testable)
+        rep.notes.push_back(std::string("Some categories have a single ") +
+                            (opt.perRecording ? "recording" : "window") +
+                            (windowSpread ? ": the spread, ranges and overlaps are taken from the windows of the "
+                                            "recordings, and the trend" : ": the trend") +
+                            " cannot be tested statistically yet (the difference may come from the recordings "
+                            "themselves). Add recordings to confirm it: at least 2 per category, about 3 for a "
+                            "significant result.");
+    else if (rep.minPossibleP > opt.alpha)
         rep.notes.push_back("With this few units no result can reach significance (smallest possible p is about " +
                             std::to_string(rep.minPossibleP) + "). Add recordings.");
     if (!opt.perRecording)
@@ -226,22 +233,36 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
             y.push_back(double(unitCat[u] + 1));
             perCat[size_t(unitCat[u])].push_back(v);
         }
+        // values the spread inside a category is computed from: its units, or their windows
+        std::vector<std::vector<double> > spread(K);
+        ft.windowSpread = windowSpread;
+        for (size_t u = 0; u < unitValues.size(); ++u) {
+            if (!windowSpread) {
+                if (std::isfinite(unitValues[u][f]))
+                    spread[size_t(unitCat[u])].push_back(unitValues[u][f]);
+                continue;
+            }
+            for (double v : rep.unitList[u].windowValues[f])
+                if (std::isfinite(v))
+                    spread[size_t(unitCat[u])].push_back(v);
+        }
         for (size_t k = 0; k < K; ++k) {
             const double m = perCat[k].empty() ? nan() : summarize(perCat[k]).mean;
             ft.mean.push_back(m);
-            ft.std.push_back(sampleStd(perCat[k], m));
             ft.count.push_back(int(perCat[k].size()));
-            ft.minValue.push_back(perCat[k].empty() ? nan() : *std::min_element(perCat[k].begin(), perCat[k].end()));
-            ft.maxValue.push_back(perCat[k].empty() ? nan() : *std::max_element(perCat[k].begin(), perCat[k].end()));
+            ft.std.push_back(sampleStd(spread[k], summarize(spread[k]).mean));
+            ft.spreadCount.push_back(int(spread[k].size()));
+            ft.minValue.push_back(spread[k].empty() ? nan() : *std::min_element(spread[k].begin(), spread[k].end()));
+            ft.maxValue.push_back(spread[k].empty() ? nan() : *std::max_element(spread[k].begin(), spread[k].end()));
         }
-        // units that fall inside the range of a neighbouring category (with data)
+        // values that fall inside the range of a neighbouring category (with data)
         for (size_t k = 0; k < K; ++k) {
             int n = 0;
-            for (double v : perCat[k]) {
+            for (double v : spread[k]) {
                 bool inside = false;
                 for (int dk = -1; dk <= 1; dk += 2) {
                     long j = long(k) + dk;
-                    while (j >= 0 && j < long(K) && ft.count[size_t(j)] == 0)
+                    while (j >= 0 && j < long(K) && ft.spreadCount[size_t(j)] == 0)
                         j += dk; // skip empty categories
                     if (j >= 0 && j < long(K) && v >= ft.minValue[size_t(j)] && v <= ft.maxValue[size_t(j)])
                         inside = true;
@@ -270,16 +291,21 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
 
         // effect size between the first and the last category
         const size_t a = 0, b = K - 1;
-        if (ft.count[a] >= 2 && ft.count[b] >= 2) {
+        if (ft.spreadCount[a] >= 2 && ft.spreadCount[b] >= 2) {
             const double sp = std::sqrt((ft.std[a] * ft.std[a] + ft.std[b] * ft.std[b]) / 2.0);
             ft.effectSize = sp > 0 ? (ft.mean[b] - ft.mean[a]) / sp : nan();
         } else {
             ft.effectSize = nan();
         }
 
-        // rank correlation and permutation test
-        if (x.size() >= 3) {
-            ft.rho = spearman(x, y);
+        // rank correlation; permutation test only when every category has >= 2 units
+        bool everyCategory = true;
+        for (size_t k = 0; k < K; ++k)
+            everyCategory = everyCategory && ft.count[k] >= 2;
+        ft.tested = everyCategory && x.size() >= 3;
+        ft.rho = x.size() >= 2 ? spearman(x, y) : nan();
+        ft.pValue = nan();
+        if (ft.tested) {
             const std::vector<double> rx = averageRanks(x);
             std::vector<double> ry = averageRanks(y);
             int extreme = 0;
@@ -289,25 +315,30 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
                     ++extreme;
             }
             ft.pValue = (extreme + 1.0) / (opt.permutations + 1.0);
-        } else {
-            ft.rho = nan();
-            ft.pValue = 1.0;
         }
         pValues.push_back(ft.pValue);
         rep.features.push_back(ft);
     }
 
-    // multiple-testing correction and verdict
-    const std::vector<double> adj = holmAdjust(pValues);
-    for (size_t f = 0; f < rep.features.size(); ++f) {
+    // multiple-testing correction over the tested features, and verdict
+    std::vector<double> tested;
+    for (double p : pValues)
+        if (std::isfinite(p))
+            tested.push_back(p);
+    const std::vector<double> adjTested = holmAdjust(tested);
+    for (size_t f = 0, t = 0; f < rep.features.size(); ++f) {
         FeatureTrend &ft = rep.features[f];
-        ft.pHolm = adj[f];
-        const bool sig = ft.pHolm < opt.alpha;
-        if (!enough || !std::isfinite(ft.rho))
+        ft.pHolm = std::isfinite(ft.pValue) ? adjTested[t++] : nan();
+        int present = 0;
+        for (int c : ft.count)
+            present += c > 0;
+        if (present < 2 || !std::isfinite(ft.rho))
             ft.verdict = TrendVerdict::InsufficientData;
-        else if (sig && ft.monotonic && ft.direction * ft.rho > 0)
+        else if (!ft.tested)
+            ft.verdict = ft.monotonic ? TrendVerdict::OrderedUntested : TrendVerdict::NoTrend;
+        else if (ft.pHolm < opt.alpha && ft.monotonic && ft.direction * ft.rho > 0)
             ft.verdict = ft.direction > 0 ? TrendVerdict::ConsistentIncrease : TrendVerdict::ConsistentDecrease;
-        else if (sig)
+        else if (ft.pHolm < opt.alpha)
             ft.verdict = TrendVerdict::SignificantNotMonotonic;
         else if (ft.monotonic)
             ft.verdict = TrendVerdict::NotSignificant;
@@ -338,14 +369,15 @@ bool writeTrendCsv(const TrendReport &rep, const std::string &path, std::string 
     f << "feature";
     for (const std::string &c : rep.categories)
         f << "," << csvEscape(c + "_mean") << "," << csvEscape(c + "_std") << "," << csvEscape(c + "_n");
-    f << ",spearman_rho,p_value,p_holm,effect_size_d,monotonic,verdict\n";
+    f << ",spread_from,spearman_rho,p_value,p_holm,effect_size_d,monotonic,verdict\n";
     for (const FeatureTrend &t : rep.features) {
         f << t.feature;
         for (size_t k = 0; k < rep.categories.size(); ++k)
             f << "," << num(t.mean[k]) << "," << num(t.std[k]) << "," << t.count[k];
-        f << "," << num(t.rho) << "," << num(t.pValue) << "," << num(t.pHolm) << "," << num(t.effectSize) << ","
+        f << "," << (t.windowSpread ? "windows" : "units") << "," << num(t.rho) << "," << num(t.pValue) << ","
+          << num(t.pHolm) << "," << num(t.effectSize) << ","
           << (t.monotonic ? (t.direction > 0 ? "increasing" : "decreasing") : "no") << ","
-          << verdictName(t.verdict) << "\n";
+          << csvEscape(verdictName(t.verdict)) << "\n";
     }
     f.flush();
     if (!f) {

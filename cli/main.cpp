@@ -59,7 +59,12 @@ static int analyze(const std::string &path, const TrendOptions &opt, const std::
         std::printf("%-20s", f.feature.c_str());
         for (size_t k = 0; k < rep.categories.size(); ++k)
             std::printf("  %-12.4g", f.mean[k]);
-        std::printf("  %7.3f %9.3g %7.2f  %s\n", f.rho, f.pHolm, f.effectSize, verdictName(f.verdict));
+        char p[32];
+        if (std::isfinite(f.pHolm))
+            std::snprintf(p, sizeof(p), "%9.3g", f.pHolm);
+        else
+            std::snprintf(p, sizeof(p), "%9s", "-");
+        std::printf("  %7.3f %s %7.2f  %s\n", f.rho, p, f.effectSize, verdictName(f.verdict));
     }
     if (!outPath.empty() && !writeTrendCsv(rep, outPath, &err)) {
         std::cerr << err << "\n";

@@ -30,6 +30,7 @@ struct TrendOptions {
 enum class TrendVerdict {
     ConsistentIncrease,
     ConsistentDecrease,
+    OrderedUntested,         // ordered means, but too few recordings for a statistical test (e.g. 1 per category)
     SignificantNotMonotonic, // significant rank correlation, but the category means are not ordered
     NotSignificant,          // ordered means, but could be chance
     NoTrend,
@@ -47,19 +48,26 @@ struct TrendUnit {
     int windows = 0;    // windows averaged into this unit
     std::vector<double> value;     // per feature (featureNames() order)
     std::vector<double> windowCv;  // per feature: std / |mean| over the windows (NaN with < 2 windows)
+    std::vector<std::vector<double> > windowValues; // per feature: the values of the windows
 };
 
 struct FeatureTrend {
     std::string feature;
-    std::vector<double> mean, std;
-    std::vector<int> count;
-    std::vector<double> minValue, maxValue; // per category, over its units
-    // per category: how many of its units lie inside the value range of a neighbouring
+    std::vector<double> mean;               // per category, mean of its units
+    std::vector<int> count;                 // per category, number of units
+    // Spread inside the categories. Normally over the units (recordings); when a category has a
+    // single recording, over the windows of the recordings instead (windowSpread = true).
+    bool windowSpread = false;
+    std::vector<double> std;                // sample std (n-1)
+    std::vector<double> minValue, maxValue; // value range
+    std::vector<int> spreadCount;           // values the spread is computed from
+    // per category: how many of those values lie inside the value range of a neighbouring
     // category (0 everywhere = the categories are internally consistent and do not mix)
     std::vector<int> overlapping;
+    bool tested = false;                    // false: too few units for the permutation test
     double rho = 0.0;
-    double pValue = 1.0;
-    double pHolm = 1.0;
+    double pValue = 1.0;                    // NaN when not tested
+    double pHolm = 1.0;                     // NaN when not tested
     double effectSize = 0.0; // (mean_last - mean_first) / pooled std
     bool monotonic = false;
     int direction = 0;       // +1 means increase along the order, -1 decrease, 0 neither
@@ -73,6 +81,7 @@ struct TrendReport {
     int units = 0;                       // recordings (or windows) used
     std::vector<int> unitsPerCategory;
     double minPossibleP = 1.0;           // smallest p-value this amount of data can give
+    bool testable = false;               // every category has >= 2 units: trends can be tested
     std::vector<FeatureTrend> features;
     std::vector<TrendUnit> unitList;
     std::vector<std::string> notes;

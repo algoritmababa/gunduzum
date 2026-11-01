@@ -60,8 +60,14 @@ testi (10.000 karıştırma, sabit tohum → tekrarlanabilir), Holm düzeltmesi,
 
 * **Analiz birimi kayıttır** (varsayılan): her kaydın pencereleri ortalanır, çünkü aynı kaydın
   pencereleri birbirine benzer ve ayrı örnek sayılırsa sonuç olduğundan güçlü görünür.
-* **Ne kadar veri gerekir?** Her kategoride en az 2 kayıt; anlamlı sonuç için **kategori başına
-  3 kayıt** (10 ölçüm birlikte test edildiği için 2'şer kayıtla hiçbir sonuç anlamlı çıkamaz).
+* **Ne kadar veri gerekir?** Sınır yok; **kategori başına tek kayıtla** da analiz çalışır:
+  * Ortalamalar sırayla artıyor/azalıyorsa sonuç **"Increase / Decrease (untested)"** olur. Yön ve
+    değişim gösterilir, ama istatistiksel test yapılmaz; çünkü tek kayıtla fark kategoriden değil
+    kaydın kendisinden (gün, ışık, kamera) gelebilir.
+  * Kategori içi yayılım, aralık ve karışma o kaydın **pencerelerinden** hesaplanır (pencere
+    uzunluğunu kayıttan kısa seçin, ör. 300 kare).
+  * Test için her kategoride en az 2 kayıt gerekir; 10 ölçüm birlikte test edildiği için anlamlı
+    ("consistent") sonuç ancak **kategori başına ~3 kayıtla** çıkabilir.
 * Sonuç **Save CSV…** ile kaydedilir (`<sonuç>_trend.csv`); komut satırı: `--analyze`.
 
 ## Sonuç tablosu (ortak veri sözleşmesi)
@@ -97,7 +103,7 @@ Bulunamazsa: **Projects → Build → qmake → Additional arguments**:
   ```
 * `tests/tests.pro` → `turbulence_tests`: sentetik verilerle doğrulama (bilinen kayma, blur,
   parlaklık dalgalanması; pencereleme, CSV, trend analizi: gerçek eğilimler bulunuyor,
-  karıştırılmış etiketlerde yanlış eğilim çıkmıyor, az veride "insufficient data").
+  karıştırılmış etiketlerde yanlış eğilim çıkmıyor, kategori başına tek kayıtla "untested" yön).
 
 ## Kod yapısı (~2.400 satır; önceki sürüm ~8.400)
 

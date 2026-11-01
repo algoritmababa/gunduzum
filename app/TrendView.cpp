@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -62,9 +63,13 @@ struct VerdictStyle {
     QString text, fg, bg, icon, shortText;
 };
 
-VerdictStyle verdictStyle(TrendVerdict v)
+VerdictStyle verdictStyle(TrendVerdict v, int direction = 0)
 {
     switch (v) {
+    case TrendVerdict::OrderedUntested:
+        return {direction < 0 ? QObject::tr("Decrease (untested)") : QObject::tr("Increase (untested)"), "#0969da",
+                "#ddf4ff", QString::fromUtf8(direction < 0 ? "\xe2\x86\x93" : "\xe2\x86\x91"),
+                QObject::tr("untested")};
     case TrendVerdict::ConsistentIncrease:
         return {QObject::tr("Consistent increase"), "#1a7f37", "#dafbe1", QString::fromUtf8("\xe2\x86\x91"), QObject::tr("consistent")};
     case TrendVerdict::ConsistentDecrease:
@@ -138,7 +143,18 @@ QString sentence(const FeatureTrend &t, const TrendReport &rep, double alpha)
     const QString first = QString::fromStdString(rep.categories.front());
     const QString last = QString::fromStdString(rep.categories.back());
     const QString p = QString::number(t.pHolm, 'g', 2);
+    const QString spreadWord = t.windowSpread ? QObject::tr("between the windows") : QObject::tr("inside the categories");
     switch (t.verdict) {
+    case TrendVerdict::OrderedUntested:
+        return QObject::tr("%1 %2 at every step from %3 to %4%5. With so few recordings per category this cannot be "
+                           "tested yet: the difference might come from the recordings themselves (day, light, "
+                           "camera) rather than from the category. Add recordings to confirm it - at least 2 per "
+                           "category, about 3 for a significant result.")
+            .arg(name, t.direction > 0 ? QObject::tr("rises") : QObject::tr("falls"), first, last,
+                 std::isfinite(t.effectSize)
+                     ? QObject::tr(" (the %1-%2 difference is %3 times the spread %4)")
+                           .arg(first, last, fmt(std::fabs(t.effectSize)), spreadWord)
+                     : QString());
     case TrendVerdict::ConsistentIncrease:
     case TrendVerdict::ConsistentDecrease:
         return QObject::tr("%1 %2 at every step from %3 to %4. A trend this strong would appear by chance "
@@ -155,12 +171,11 @@ QString sentence(const FeatureTrend &t, const TrendReport &rep, double alpha)
                            "change in the same direction at every step - see the arrows below.")
             .arg(name, fmt(t.rho), p);
     case TrendVerdict::NoTrend:
-        return QObject::tr("%1 does not change consistently along the categories (p = %2).").arg(name, p);
+        return t.tested ? QObject::tr("%1 does not change consistently along the categories (p = %2).").arg(name, p)
+                        : QObject::tr("%1 does not change in the same direction at every step between the "
+                                      "categories.").arg(name);
     case TrendVerdict::InsufficientData:
-        return QObject::tr("Not enough data: every category needs at least 2 %1.")
-            .arg(rep.unitList.empty() || rep.unitList.front().id.find(" #") == std::string::npos
-                     ? QObject::tr("recordings")
-                     : QObject::tr("windows"));
+        return QObject::tr("Not enough data: at least two categories need values for %1.").arg(name);
     }
     return QString();
 }
@@ -227,7 +242,8 @@ TrendView::TrendView(QWidget *parent)
                              "<b>Analyze</b>.<br>For every measurement you will see how it changes from one "
                              "category to the next, whether the recordings of a category agree with each other, "
                              "and whether the trend could be chance.<br><br>"
-                             "Tip: use at least 3 recordings per category."),
+                             "One recording per category is enough to explore; about 3 per category are needed "
+                             "to confirm a trend statistically."),
                           "muted", true);
     eText->setAlignment(Qt::AlignCenter);
     ev->addWidget(eText);
@@ -249,9 +265,13 @@ TrendView::TrendView(QWidget *parent)
     split->addWidget(left);
 
     QScrollArea *scroll = new QScrollArea;
+    m_scroll = scroll;
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->viewport()->installEventFilter(this);
     QWidget *detailHost = new QWidget;
+    m_detailHost = detailHost;
     detailHost->setObjectName("trendRoot");
     detailHost->setAttribute(Qt::WA_StyledBackground, true);
     m_detailLayout = new QVBoxLayout(detailHost);
@@ -410,9 +430,22 @@ void TrendView::rebuildSummary()
         delete it;
     }
     const TrendVerdict order[] = {TrendVerdict::ConsistentIncrease, TrendVerdict::ConsistentDecrease,
-                                  TrendVerdict::NotSignificant, TrendVerdict::SignificantNotMonotonic,
+                                  TrendVerdict::OrderedUntested, TrendVerdict::NotSignificant, TrendVerdict::SignificantNotMonotonic,
                                   TrendVerdict::NoTrend, TrendVerdict::InsufficientData};
     for (TrendVerdict v : order) {
+        if (v == TrendVerdict::OrderedUntested) {
+            // separate counters for untested increases and decreases
+            for (int dir = 1; dir >= -1; dir -= 2) {
+                int n = 0;
+                for (const FeatureTrend &t : m_report.features)
+                    n += t.verdict == v && t.direction == dir;
+                if (n == 0)
+                    continue;
+                const VerdictStyle st = verdictStyle(v, dir);
+                chips->addWidget(badge(QString("%1  %2  %3").arg(st.icon).arg(n).arg(st.text), st.fg, st.bg));
+            }
+            continue;
+        }
         int n = 0;
         for (const FeatureTrend &t : m_report.features)
             n += t.verdict == v;
@@ -441,7 +474,7 @@ QWidget *TrendView::buildListRow(const FeatureTrend &t) const
     name->setStyleSheet("font-weight: 600;");
     name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     top->addWidget(name, 1);
-    const VerdictStyle st = verdictStyle(t.verdict);
+    const VerdictStyle st = verdictStyle(t.verdict, t.direction);
     QLabel *b = badge(st.icon + " " + st.shortText, st.fg, st.bg);
     b->setToolTip(st.text);
     b->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
@@ -489,6 +522,31 @@ void TrendView::showFeature(int row)
     }
     m_detail = buildDetail(m_report.features[size_t(row)], size_t(row));
     m_detailLayout->addWidget(m_detail);
+    fitDetail();
+}
+
+// QScrollArea does not account for word-wrapped labels (height-for-width) when it sizes its
+// widget, so the page would be squeezed into the viewport. Give the page the height its
+// layout needs at the current width; the scroll area then scrolls instead of clipping.
+void TrendView::fitDetail()
+{
+    if (!m_detail)
+        return;
+    const QMargins mg = m_detailLayout->contentsMargins();
+    const int w = m_scroll->viewport()->width() - mg.left() - mg.right();
+    const int h = m_detail->hasHeightForWidth() ? m_detail->heightForWidth(w) : m_detail->sizeHint().height();
+    if (h > 0) {
+        m_detail->setMinimumHeight(h);
+        // the scroll area sizes its direct child: it must know the full height to scroll
+        m_detailHost->setMinimumHeight(h + mg.top() + mg.bottom());
+    }
+}
+
+bool TrendView::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_scroll->viewport() && event->type() == QEvent::Resize)
+        fitDetail();
+    return QWidget::eventFilter(watched, event);
 }
 
 QWidget *TrendView::buildDetail(const FeatureTrend &t, size_t fi) const
@@ -509,16 +567,22 @@ QWidget *TrendView::buildDetail(const FeatureTrend &t, size_t fi) const
                                   (unit.empty() ? QString() : QString(" (%1)").arg(QString::fromStdString(unit))),
                               "title"));
     titleRow->addStretch(1);
-    const VerdictStyle st = verdictStyle(t.verdict);
+    const VerdictStyle st = verdictStyle(t.verdict, t.direction);
     titleRow->addWidget(badge(st.icon + " " + st.text.toUpper(), st.fg, st.bg));
     hv->addLayout(titleRow);
     hv->addWidget(label(QString::fromStdString(featureMeaning(t.feature)) + "  <i>(" +
                             QString::fromStdString(t.feature) + ")</i>",
                         "muted", true));
+    // coloured box; the padding lives in the frame layout so that word wrapping measures correctly
+    QFrame *explainBox = new QFrame;
+    explainBox->setStyleSheet(QString("QFrame { background: %1; border-radius: 8px; }").arg(st.bg));
+    QVBoxLayout *eb = new QVBoxLayout(explainBox);
+    eb->setContentsMargins(12, 9, 12, 9);
     QLabel *explain = label(sentence(t, m_report, m_alpha->value()), nullptr, true);
-    explain->setStyleSheet(QString("QLabel { background: %1; color: %2; border-radius: 8px; padding: 10px; }")
-                               .arg(st.bg, st.fg == "#57606a" || st.fg == "#6e7781" ? "#1f2328" : st.fg));
-    hv->addWidget(explain);
+    explain->setStyleSheet(QString("QLabel { color: %1; }")
+                               .arg(st.fg == "#57606a" || st.fg == "#6e7781" ? "#1f2328" : st.fg));
+    eb->addWidget(explain);
+    hv->addWidget(explainBox);
 
     // key numbers
     QHBoxLayout *tiles = new QHBoxLayout;
@@ -526,16 +590,23 @@ QWidget *TrendView::buildDetail(const FeatureTrend &t, size_t fi) const
     tiles->addWidget(tile(fmt(t.rho), tr("trend strength (rho)"),
                           tr("Spearman rank correlation between the value and the category order: "
                              "+1 = always rising, -1 = always falling, 0 = no relation.")));
-    tiles->addWidget(tile(QString::number(t.pHolm, 'g', 2), tr("chance probability (p)"),
-                          tr("Probability of a trend at least this strong when the category labels are shuffled "
-                             "(permutation test, Holm-corrected over all measurements)."),
-                          t.pHolm < m_alpha->value() ? "#1a7f37" : "#9a6700"));
+    if (t.tested)
+        tiles->addWidget(tile(QString::number(t.pHolm, 'g', 2), tr("chance probability (p)"),
+                              tr("Probability of a trend at least this strong when the category labels are shuffled "
+                                 "(permutation test, Holm-corrected over all tested measurements)."),
+                              t.pHolm < m_alpha->value() ? "#1a7f37" : "#9a6700"));
+    else
+        tiles->addWidget(tile(QString::fromUtf8("\xe2\x80\x93"), tr("not tested yet"),
+                              tr("The permutation test needs at least 2 recordings in every category."), "#0969da"));
     tiles->addWidget(tile(fmt(t.effectSize),
                           tr("%1-%2 difference (d)")
                               .arg(QString::fromStdString(m_report.categories.front()),
                                    QString::fromStdString(m_report.categories.back())),
-                          tr("Difference between the first and last category divided by the spread inside the "
-                             "categories (Cohen's d). Above ~1 the categories barely overlap.")));
+                          t.windowSpread
+                              ? tr("Difference between the first and last category divided by the spread between the "
+                                   "windows of the recordings (single recording per category).")
+                              : tr("Difference between the first and last category divided by the spread inside the "
+                                   "categories (Cohen's d). Above ~1 the categories barely overlap.")));
     tiles->addWidget(tile(change(t.mean.front(), t.mean.back()), tr("total change"),
                           tr("Change of the mean from the first to the last category.")));
     hv->addLayout(tiles);
@@ -566,34 +637,52 @@ QWidget *TrendView::buildDetail(const FeatureTrend &t, size_t fi) const
         QFrame *c = new QFrame;
         c->setObjectName("tile");
         c->setStyleSheet(QString("QFrame#tile { border-top: 4px solid %1; }").arg(categoryColor(k)));
+        // cards share the width equally; their texts wrap instead of widening the page
+        c->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         QVBoxLayout *kv = new QVBoxLayout(c);
         kv->setContentsMargins(12, 8, 12, 10);
         kv->setSpacing(3);
         QLabel *name = label(QString::fromStdString(m_report.categories[k]));
         name->setStyleSheet(QString("font-weight: 700; color: %1;").arg(categoryColor(k)));
         kv->addWidget(name);
-        kv->addWidget(label(withUnit(fmt(t.mean[k]), unit), "tileValue"));
+        kv->addWidget(label(withUnit(fmt(t.mean[k]), unit), "tileValue", true));
         const double cvPct = std::isfinite(t.std[k]) && t.mean[k] != 0 ? 100.0 * t.std[k] / std::fabs(t.mean[k])
                                                                        : std::nan("");
         kv->addWidget(label(QString::fromUtf8("\xc2\xb1 %1  (CV %2)")
                                 .arg(fmt(t.std[k]),
                                      std::isfinite(cvPct) ? QString::number(cvPct, 'f', 1) + "%"
                                                           : QString::fromUtf8("\xe2\x80\x93")),
-                            "small"));
-        kv->addWidget(label(tr("range %1 ... %2").arg(fmt(t.minValue[k]), fmt(t.maxValue[k])), "small"));
-        kv->addWidget(label(tr("n = %1").arg(t.count[k]), "small"));
+                            "small", true));
+        kv->addWidget(label(tr("range %1 ... %2").arg(fmt(t.minValue[k]), fmt(t.maxValue[k])), "small", true));
+        kv->addWidget(label(t.windowSpread ? tr("%1 recording(s), %2 windows").arg(t.count[k]).arg(t.spreadCount[k])
+                                           : tr("n = %1").arg(t.count[k]),
+                            "small", true));
         if (t.count[k] == 0)
             kv->addWidget(badge(tr("no data"), "#6e7781", "#eaeef2", false));
+        else if (t.spreadCount[k] < 2)
+            kv->addWidget(badge(tr("spread unknown"), "#6e7781", "#eaeef2", false));
         else if (t.overlapping[k] == 0)
             kv->addWidget(badge(QString::fromUtf8("\xe2\x9c\x93 ") + tr("consistent"), "#1a7f37", "#dafbe1", false));
-        else
-            kv->addWidget(badge(tr("%1 of %2 overlap").arg(t.overlapping[k]).arg(t.count[k]), "#9a6700", "#fff8c5",
-                                false));
+        else {
+            QLabel *b = badge(tr("%1/%2 overlap").arg(t.overlapping[k]).arg(t.spreadCount[k]), "#9a6700", "#fff8c5",
+                              false);
+            b->setToolTip(tr("%1 of the %2 %3 of this category lie inside the value range of a neighbouring "
+                             "category.")
+                              .arg(t.overlapping[k])
+                              .arg(t.spreadCount[k])
+                              .arg(t.windowSpread ? tr("windows") : tr("recordings")));
+            kv->addWidget(b);
+        }
         flow->addWidget(c, 1);
     }
     cv->addLayout(flow);
-    cv->addWidget(label(tr("<b>consistent</b>: all recordings of the category stay outside the value range of the "
-                           "neighbouring categories. <b>CV</b>: spread inside the category relative to its mean."),
+    cv->addWidget(label(t.windowSpread
+                            ? tr("<b>consistent</b>: all windows of the category stay outside the value range of the "
+                                 "neighbouring categories (single recording per category, so the windows are used). "
+                                 "<b>CV</b>: spread between the windows relative to the mean.")
+                            : tr("<b>consistent</b>: all recordings of the category stay outside the value range of "
+                                 "the neighbouring categories. <b>CV</b>: spread inside the category relative to its "
+                                 "mean."),
                         "small", true));
     v->addWidget(cats);
 

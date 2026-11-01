@@ -283,14 +283,44 @@ int main(int argc, char **argv)
                               f.verdict == TrendVerdict::ConsistentDecrease;
         CHECK(falsePositives == 0, "shuffled labels give no consistent trend (" << falsePositives << ")");
 
-        // too little data: 1 recording per category
+        // one recording per category: explored (direction, window spread), but not tested
         Table few;
         few.header = t.header;
         for (const std::vector<std::string> &row : t.rows)
             if (row[size_t(t.column("source"))].back() == '0')
                 few.rows.push_back(row);
         const TrendReport frep = analyzeTrends(few, TrendOptions());
-        CHECK(frep.ok && frep.features[0].verdict == TrendVerdict::InsufficientData, "insufficient data");
+        CHECK(frep.ok && !frep.testable && frep.units == 3 && !frep.notes.empty(), "single recording per category");
+        for (const FeatureTrend &f : frep.features) {
+            CHECK(!f.tested && std::isnan(f.pHolm), f.feature << " not tested");
+            CHECK(f.windowSpread && f.spreadCount == std::vector<int>({2, 2, 2}), f.feature << " spread from windows");
+            CHECK(f.verdict != TrendVerdict::ConsistentIncrease && f.verdict != TrendVerdict::ConsistentDecrease,
+                  f.feature << " never 'consistent' without a test");
+            if (f.feature == "jitter_mean" || f.feature == "scintillation_index")
+                CHECK(f.verdict == TrendVerdict::OrderedUntested && f.direction == 1, f.feature << " rising, untested");
+            if (f.feature == "sharpness_mean")
+                CHECK(f.verdict == TrendVerdict::OrderedUntested && f.direction == -1, "sharpness falling, untested");
+            if (f.feature == "jitter_mean")
+                CHECK(std::isfinite(f.effectSize) && f.overlapping == std::vector<int>({0, 0, 0}),
+                      "effect size and overlap from windows");
+        }
+        // two categories with one recording each still give a direction
+        Table two_rec;
+        two_rec.header = t.header;
+        for (const std::vector<std::string> &row : few.rows)
+            if (row[size_t(t.column("category"))] != "MEDIUM")
+                two_rec.rows.push_back(row);
+        const TrendReport trec = analyzeTrends(two_rec, TrendOptions());
+        CHECK(trec.ok && trec.categories.size() == 2 && trec.features[0].verdict == TrendVerdict::OrderedUntested,
+              "two categories, one recording each");
+        // trend CSV of an untested analysis
+        std::string err3;
+        CHECK(writeTrendCsv(frep, work + "/trend_single.csv", &err3), err3);
+        Table trendCsv;
+        CHECK(loadTable(work + "/trend_single.csv", trendCsv, &err3), err3);
+        for (const std::vector<std::string> &row : trendCsv.rows)
+            CHECK(row.size() == trendCsv.header.size(), "trend csv row width");
+        CHECK(trendCsv.rows[0][size_t(trendCsv.column("verdict"))] == "ordered, not tested", "verdict with comma");
 
         // custom order with a missing category is still analyzed (LOW vs HIGH)
         TrendOptions two;

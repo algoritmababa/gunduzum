@@ -14,6 +14,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QScrollArea;
 class QStackedWidget;
 class QVBoxLayout;
 
@@ -40,8 +41,12 @@ private slots:
     void save();
     void showFeature(int row);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     QWidget *buildToolbar();
+    void fitDetail();
     void rebuildSummary();
     void rebuildList();
     QWidget *buildListRow(const turb::FeatureTrend &t) const;
@@ -62,6 +67,8 @@ private:
     QWidget *m_summaryCard;
     QStackedWidget *m_stack; // 0: empty state, 1: results
     QListWidget *m_list;
+    QScrollArea *m_scroll;
+    QWidget *m_detailHost;
     QVBoxLayout *m_detailLayout;
     QWidget *m_detail = nullptr;
 };
