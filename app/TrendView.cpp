@@ -76,11 +76,33 @@ VerdictStyle verdictStyle(TrendVerdict v, int direction = 0)
         return {QObject::tr("Consistent decrease"), "#1a7f37", "#dafbe1", QString::fromUtf8("\xe2\x86\x93"), QObject::tr("consistent")};
     case TrendVerdict::NotSignificant:
         return {QObject::tr("Ordered, not significant"), "#9a6700", "#fff8c5", "~", QObject::tr("not significant")};
+    case TrendVerdict::BelowResolution:
+        return {QObject::tr("Below resolution"), "#57606a", "#eaeef2", QString::fromUtf8("\xe2\x89\x88"),
+                QObject::tr("too small")};
     case TrendVerdict::SignificantNotMonotonic:
         return {QObject::tr("Significant, not ordered"), "#8250df", "#fbefff", "!", QObject::tr("not ordered")};
     case TrendVerdict::NoTrend:
         return {QObject::tr("No consistent trend"), "#57606a", "#eaeef2", QString::fromUtf8("\xe2\x80\x93"), QObject::tr("no trend")};
     case TrendVerdict::InsufficientData:
+        return {QObject::tr("Insufficient data"), "#6e7781", "#f6f8fa", "?", QObject::tr("too few data")};
+    }
+    return {QString(), "#000", "#fff", QString(), QString()};
+}
+
+VerdictStyle algorithmStyle(AlgorithmVerdict v)
+{
+    switch (v) {
+    case AlgorithmVerdict::Useful:
+        return {QObject::tr("Useful"), "#1a7f37", "#dafbe1", QString::fromUtf8("\xe2\x9c\x93"), QObject::tr("useful")};
+    case AlgorithmVerdict::Promising:
+        return {QObject::tr("Promising (untested)"), "#0969da", "#ddf4ff", QString::fromUtf8("\xe2\x97\x94"),
+                QObject::tr("promising")};
+    case AlgorithmVerdict::NotConfirmed:
+        return {QObject::tr("Not confirmed"), "#9a6700", "#fff8c5", "~", QObject::tr("not confirmed")};
+    case AlgorithmVerdict::NoBenefit:
+        return {QObject::tr("No benefit"), "#57606a", "#eaeef2", QString::fromUtf8("\xe2\x9c\x95"),
+                QObject::tr("no benefit")};
+    case AlgorithmVerdict::InsufficientData:
         return {QObject::tr("Insufficient data"), "#6e7781", "#f6f8fa", "?", QObject::tr("too few data")};
     }
     return {QString(), "#000", "#fff", QString(), QString()};
@@ -166,6 +188,10 @@ QString sentence(const FeatureTrend &t, const TrendReport &rep, double alpha)
         return QObject::tr("The category means of %1 are in order, but with this amount of data the trend could "
                            "be chance (p = %2). More recordings per category are needed to confirm it.")
             .arg(name, p);
+    case TrendVerdict::BelowResolution:
+        return QObject::tr("%1 changes in order from %2 to %3, but the total change (%4) is smaller than this "
+                           "algorithm can reliably resolve (%5). It is not counted as an effect.")
+            .arg(name, first, last, fmt(t.change), fmt(t.resolution));
     case TrendVerdict::SignificantNotMonotonic:
         return QObject::tr("%1 is clearly related to the category order (rho = %2, p = %3), but the means do not "
                            "change in the same direction at every step - see the arrows below.")
@@ -225,6 +251,11 @@ TrendView::TrendView(QWidget *parent)
     m_summaryChips->layout()->setContentsMargins(0, 0, 0, 0);
     sh->addWidget(m_summaryChips);
     sv->addLayout(sh);
+    m_scoreboard = new QWidget;
+    QHBoxLayout *sb = new QHBoxLayout(m_scoreboard);
+    sb->setContentsMargins(0, 2, 0, 2);
+    sb->setSpacing(6);
+    sv->addWidget(m_scoreboard);
     m_notes = label(QString(), "notes", true);
     sv->addWidget(m_notes);
     m_summaryCard->hide();
@@ -235,7 +266,7 @@ TrendView::TrendView(QWidget *parent)
     QFrame *empty = card();
     QVBoxLayout *ev = new QVBoxLayout(empty);
     ev->addStretch(1);
-    QLabel *eTitle = label(tr("Which measurements follow the turbulence categories?"), "title");
+    QLabel *eTitle = label(tr("Which algorithms follow the turbulence categories?"), "title");
     eTitle->setAlignment(Qt::AlignCenter);
     ev->addWidget(eTitle);
     QLabel *eText = label(tr("Measure labeled recordings first (category LOW / MEDIUM / HIGH), then press "
@@ -380,16 +411,16 @@ void TrendView::analyze()
     rebuildSummary();
     rebuildList();
     m_stack->setCurrentIndex(1);
-    m_list->setCurrentRow(0);
+    m_list->setCurrentRow(1); // first feature of the first (most useful) algorithm
 
-    int consistent = 0;
-    for (const FeatureTrend &t : m_report.features)
-        consistent += t.verdict == TrendVerdict::ConsistentIncrease || t.verdict == TrendVerdict::ConsistentDecrease;
-    emit logMessage(tr("Trend analysis of %1: %2 unit(s), %3 of %4 measurements change consistently")
+    QStringList useful;
+    for (const AlgorithmTrend &a : m_report.algorithms)
+        if (a.verdict == AlgorithmVerdict::Useful || a.verdict == AlgorithmVerdict::Promising)
+            useful << QString::fromStdString(a.label);
+    emit logMessage(tr("Trend analysis of %1: %2 unit(s); useful / promising algorithms: %3")
                         .arg(QFileInfo(path).fileName())
                         .arg(m_report.units)
-                        .arg(consistent)
-                        .arg(m_report.features.size()));
+                        .arg(useful.isEmpty() ? tr("none") : useful.join(", ")));
 }
 
 void TrendView::save()
@@ -423,37 +454,45 @@ void TrendView::rebuildSummary()
                                 .arg(m_perRecording ? tr("recordings") : tr("windows"))
                                 .arg(parts.join("&nbsp;&nbsp; ")));
 
-    // verdict counters
+    // algorithm counters
     QLayout *chips = m_summaryChips->layout();
     while (QLayoutItem *it = chips->takeAt(0)) {
         delete it->widget();
         delete it;
     }
-    const TrendVerdict order[] = {TrendVerdict::ConsistentIncrease, TrendVerdict::ConsistentDecrease,
-                                  TrendVerdict::OrderedUntested, TrendVerdict::NotSignificant, TrendVerdict::SignificantNotMonotonic,
-                                  TrendVerdict::NoTrend, TrendVerdict::InsufficientData};
-    for (TrendVerdict v : order) {
-        if (v == TrendVerdict::OrderedUntested) {
-            // separate counters for untested increases and decreases
-            for (int dir = 1; dir >= -1; dir -= 2) {
-                int n = 0;
-                for (const FeatureTrend &t : m_report.features)
-                    n += t.verdict == v && t.direction == dir;
-                if (n == 0)
-                    continue;
-                const VerdictStyle st = verdictStyle(v, dir);
-                chips->addWidget(badge(QString("%1  %2  %3").arg(st.icon).arg(n).arg(st.text), st.fg, st.bg));
-            }
-            continue;
-        }
+    const AlgorithmVerdict order[] = {AlgorithmVerdict::Useful, AlgorithmVerdict::Promising,
+                                      AlgorithmVerdict::NotConfirmed, AlgorithmVerdict::NoBenefit,
+                                      AlgorithmVerdict::InsufficientData};
+    for (AlgorithmVerdict v : order) {
         int n = 0;
-        for (const FeatureTrend &t : m_report.features)
-            n += t.verdict == v;
+        for (const AlgorithmTrend &a : m_report.algorithms)
+            n += a.verdict == v;
         if (n == 0)
             continue;
-        const VerdictStyle st = verdictStyle(v);
-        chips->addWidget(badge(QString("%1  %2  %3").arg(st.icon).arg(n).arg(st.text), st.fg, st.bg));
+        const VerdictStyle st = algorithmStyle(v);
+        chips->addWidget(badge(tr("%1  %2 %3").arg(st.icon).arg(n).arg(st.shortText), st.fg, st.bg));
     }
+
+    // scoreboard: one button per algorithm
+    QLayout *sb = m_scoreboard->layout();
+    while (QLayoutItem *it = sb->takeAt(0)) {
+        delete it->widget();
+        delete it;
+    }
+    sb->addWidget(label(tr("ALGORITHMS"), "section"));
+    for (size_t i = 0; i < m_report.algorithms.size(); ++i) {
+        const AlgorithmTrend &a = m_report.algorithms[i];
+        const VerdictStyle st = algorithmStyle(a.verdict);
+        QPushButton *b = new QPushButton(st.icon + " " + QString::fromStdString(a.label));
+        b->setCursor(Qt::PointingHandCursor);
+        b->setToolTip(QString("%1 - %2").arg(QString::fromStdString(a.algorithm), st.text));
+        b->setStyleSheet(QString("QPushButton { color: %1; background: %2; border: 1px solid %1; border-radius: 12px;"
+                                 " padding: 3px 10px; font-weight: 600; } QPushButton:hover { background: #ffffff; }")
+                             .arg(st.fg, st.bg));
+        connect(b, &QPushButton::clicked, this, [this, i]() { selectAlgorithm(i); });
+        static_cast<QHBoxLayout *>(sb)->addWidget(b);
+    }
+    static_cast<QHBoxLayout *>(sb)->addStretch(1);
 
     QStringList notes;
     for (const std::string &n : m_report.notes)
@@ -499,28 +538,85 @@ QWidget *TrendView::buildListRow(const FeatureTrend &t) const
     return w;
 }
 
+QWidget *TrendView::buildGroupHeader(const AlgorithmTrend &a) const
+{
+    QWidget *w = new QWidget;
+    w->setStyleSheet("background: #f6f8fa;");
+    QVBoxLayout *v = new QVBoxLayout(w);
+    v->setContentsMargins(12, 8, 12, 8);
+    v->setSpacing(2);
+    QHBoxLayout *top = new QHBoxLayout;
+    QLabel *name = label(QString::fromStdString(a.label).toUpper());
+    name->setStyleSheet("font-weight: 700; letter-spacing: 0.5px;");
+    name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    top->addWidget(name, 1);
+    const VerdictStyle st = algorithmStyle(a.verdict);
+    QLabel *b = badge(st.icon + " " + st.text, st.fg, st.bg);
+    b->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    top->addWidget(b, 0, Qt::AlignVCenter);
+    v->addLayout(top);
+    QString line = QString::fromStdString(a.algorithm);
+    if (a.best >= 0)
+        line += tr("  -  best: %1").arg(QString::fromStdString(featureLabel(m_report.features[size_t(a.best)].feature)));
+    QLabel *l = label(line, "small", true);
+    l->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    v->addWidget(l);
+    return w;
+}
+
 void TrendView::rebuildList()
 {
     m_list->clear();
-    for (const FeatureTrend &t : m_report.features) {
-        QListWidgetItem *it = new QListWidgetItem(m_list);
-        QWidget *row = buildListRow(t);
-        // width follows the list; height of a two-line row
-        it->setSizeHint(QSize(0, 2 * m_list->fontMetrics().height() + 34));
-        m_list->setItemWidget(it, row);
+    m_rowFeature.clear();
+    m_algorithmRow.assign(m_report.algorithms.size(), -1);
+
+    // most useful algorithms first, metric order otherwise
+    std::vector<size_t> order;
+    for (size_t i = 0; i < m_report.algorithms.size(); ++i)
+        order.push_back(i);
+    std::stable_sort(order.begin(), order.end(), [this](size_t a, size_t b) {
+        return int(m_report.algorithms[a].verdict) < int(m_report.algorithms[b].verdict);
+    });
+
+    const int rowH = 2 * m_list->fontMetrics().height() + 34;
+    for (size_t ai : order) {
+        const AlgorithmTrend &a = m_report.algorithms[ai];
+        QListWidgetItem *head = new QListWidgetItem(m_list);
+        head->setFlags(Qt::ItemIsEnabled); // not selectable
+        head->setSizeHint(QSize(0, rowH));
+        m_list->setItemWidget(head, buildGroupHeader(a));
+        m_rowFeature.push_back(-1);
+        for (size_t f : a.features) {
+            QListWidgetItem *it = new QListWidgetItem(m_list);
+            it->setSizeHint(QSize(0, rowH));
+            m_list->setItemWidget(it, buildListRow(m_report.features[f]));
+            if (int(f) == a.best)
+                m_algorithmRow[ai] = m_list->count() - 1;
+            m_rowFeature.push_back(int(f));
+        }
     }
+}
+
+void TrendView::selectAlgorithm(size_t algorithm)
+{
+    if (algorithm >= m_algorithmRow.size() || m_algorithmRow[algorithm] < 0)
+        return;
+    const int row = m_algorithmRow[algorithm];
+    m_list->setCurrentRow(row);
+    m_list->scrollToItem(m_list->item(row > 0 ? row - 1 : row), QAbstractItemView::PositionAtTop);
 }
 
 void TrendView::showFeature(int row)
 {
-    if (row < 0 || row >= int(m_report.features.size()))
+    if (row < 0 || row >= int(m_rowFeature.size()) || m_rowFeature[size_t(row)] < 0)
         return;
+    const size_t fi = size_t(m_rowFeature[size_t(row)]);
     if (m_detail) {
         m_detailLayout->removeWidget(m_detail);
         m_detail->hide(); // deleted later, but must not be painted any more
         m_detail->deleteLater();
     }
-    m_detail = buildDetail(m_report.features[size_t(row)], size_t(row));
+    m_detail = buildDetail(m_report.features[fi], fi);
     m_detailLayout->addWidget(m_detail);
     fitDetail();
 }
@@ -607,8 +703,12 @@ QWidget *TrendView::buildDetail(const FeatureTrend &t, size_t fi) const
                                    "windows of the recordings (single recording per category).")
                               : tr("Difference between the first and last category divided by the spread inside the "
                                    "categories (Cohen's d). Above ~1 the categories barely overlap.")));
-    tiles->addWidget(tile(change(t.mean.front(), t.mean.back()), tr("total change"),
-                          tr("Change of the mean from the first to the last category.")));
+    tiles->addWidget(tile(change(t.mean.front(), t.mean.back()),
+                          tr("total change (resolvable: %1)").arg(withUnit(fmt(t.resolution), unit)),
+                          tr("Change of the mean from the first to the last category. Changes smaller than %1 are "
+                             "below what this algorithm can reliably measure and are not counted.")
+                              .arg(withUnit(fmt(t.resolution), unit)),
+                          t.belowResolution ? "#57606a" : QString()));
     hv->addLayout(tiles);
     v->addWidget(head);
 

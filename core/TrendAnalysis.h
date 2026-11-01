@@ -31,6 +31,7 @@ enum class TrendVerdict {
     ConsistentIncrease,
     ConsistentDecrease,
     OrderedUntested,         // ordered means, but too few recordings for a statistical test (e.g. 1 per category)
+    BelowResolution,         // ordered, but the change is smaller than the algorithm can resolve
     SignificantNotMonotonic, // significant rank correlation, but the category means are not ordered
     NotSignificant,          // ordered means, but could be chance
     NoTrend,
@@ -38,6 +39,16 @@ enum class TrendVerdict {
 };
 
 const char *verdictName(TrendVerdict v);
+
+// Does an algorithm (metric) help to tell the categories apart? Derived from its features:
+//   Useful        - at least one feature changes consistently (tested and significant)
+//   Promising     - ordered along the categories, but too few recordings to test yet
+//   NotConfirmed  - tested, but no feature is both ordered and significant
+//   NoBenefit     - no feature changes in the same direction along the categories
+//   InsufficientData
+enum class AlgorithmVerdict { Useful, Promising, NotConfirmed, NoBenefit, InsufficientData };
+
+const char *algorithmVerdictName(AlgorithmVerdict v);
 
 // One analysis unit: a recording (its windows averaged) or a single window.
 struct TrendUnit {
@@ -69,9 +80,23 @@ struct FeatureTrend {
     double pValue = 1.0;                    // NaN when not tested
     double pHolm = 1.0;                     // NaN when not tested
     double effectSize = 0.0; // (mean_last - mean_first) / pooled std
+    double change = 0.0;     // mean_last - mean_first
+    double resolution = 0.0; // smallest change the algorithm resolves here (feature unit)
+    bool belowResolution = false;
     bool monotonic = false;
     int direction = 0;       // +1 means increase along the order, -1 decrease, 0 neither
     TrendVerdict verdict = TrendVerdict::InsufficientData;
+};
+
+struct AlgorithmTrend {
+    std::string metric;        // metric name (feature prefix)
+    std::string label;         // e.g. "Jitter"
+    std::string algorithm;     // e.g. "Phase correlation"
+    std::vector<size_t> features; // indices into TrendReport::features
+    int best = -1;             // most informative feature (index into TrendReport::features)
+    int consistent = 0;        // features with a consistent (tested) trend
+    int untested = 0;          // features ordered along the categories but not tested
+    AlgorithmVerdict verdict = AlgorithmVerdict::InsufficientData;
 };
 
 struct TrendReport {
@@ -83,6 +108,7 @@ struct TrendReport {
     double minPossibleP = 1.0;           // smallest p-value this amount of data can give
     bool testable = false;               // every category has >= 2 units: trends can be tested
     std::vector<FeatureTrend> features;
+    std::vector<AlgorithmTrend> algorithms; // one per metric, in metric order
     std::vector<TrendUnit> unitList;
     std::vector<std::string> notes;
 };

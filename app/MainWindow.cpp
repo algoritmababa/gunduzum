@@ -147,12 +147,12 @@ MainWindow::MainWindow(QWidget *parent)
     of->addRow(m_frameCsv);
     iv->addWidget(outBox);
 
-    QGroupBox *metricsBox = new QGroupBox(tr("Measured per frame"));
+    QGroupBox *metricsBox = new QGroupBox(tr("Algorithms (all run on every recording)"));
     QVBoxLayout *mv = new QVBoxLayout(metricsBox);
     for (const std::unique_ptr<turb::Metric> &m : turb::createMetrics()) {
-        QLabel *l = new QLabel(QString("<b>%1</b>: %2")
-                                   .arg(QString::fromStdString(m->name()), QString::fromStdString(m->description())));
-        l->setWordWrap(true);
+        QLabel *l = new QLabel(QString("<b>%1</b> &nbsp;<span style='color:#57606a'>%2</span>")
+                                   .arg(QString::fromStdString(m->label()), QString::fromStdString(m->algorithm())));
+        l->setToolTip(QString::fromStdString(m->description()));
         mv->addWidget(l);
     }
     iv->addWidget(metricsBox);

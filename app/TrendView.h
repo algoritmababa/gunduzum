@@ -50,6 +50,8 @@ private:
     void rebuildSummary();
     void rebuildList();
     QWidget *buildListRow(const turb::FeatureTrend &t) const;
+    QWidget *buildGroupHeader(const turb::AlgorithmTrend &a) const;
+    void selectAlgorithm(size_t algorithm);
     QWidget *buildDetail(const turb::FeatureTrend &t, size_t featureIndex) const;
     QString categoryColor(size_t k) const;
 
@@ -63,10 +65,13 @@ private:
     QPushButton *m_saveButton;
     QLabel *m_summaryTitle;
     QWidget *m_summaryChips;
+    QWidget *m_scoreboard;   // one button per algorithm, coloured by its verdict
     QLabel *m_notes;
     QWidget *m_summaryCard;
     QStackedWidget *m_stack; // 0: empty state, 1: results
     QListWidget *m_list;
+    std::vector<int> m_rowFeature;    // list row -> feature index (-1 = algorithm header)
+    std::vector<int> m_algorithmRow;  // algorithm index -> list row of its best feature
     QScrollArea *m_scroll;
     QWidget *m_detailHost;
     QVBoxLayout *m_detailLayout;

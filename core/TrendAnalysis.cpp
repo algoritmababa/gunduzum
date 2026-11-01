@@ -22,10 +22,85 @@ const char *verdictName(TrendVerdict v)
     case TrendVerdict::SignificantNotMonotonic: return "significant, not monotonic";
     case TrendVerdict::NotSignificant: return "ordered, not significant";
     case TrendVerdict::OrderedUntested: return "ordered, not tested";
+    case TrendVerdict::BelowResolution: return "below resolution";
     case TrendVerdict::NoTrend: return "no consistent trend";
     case TrendVerdict::InsufficientData: return "insufficient data";
     }
     return "";
+}
+
+const char *algorithmVerdictName(AlgorithmVerdict v)
+{
+    switch (v) {
+    case AlgorithmVerdict::Useful: return "useful";
+    case AlgorithmVerdict::Promising: return "promising (untested)";
+    case AlgorithmVerdict::NotConfirmed: return "not confirmed";
+    case AlgorithmVerdict::NoBenefit: return "no benefit";
+    case AlgorithmVerdict::InsufficientData: return "insufficient data";
+    }
+    return "";
+}
+
+// lower = more informative
+static int verdictRank(TrendVerdict v)
+{
+    switch (v) {
+    case TrendVerdict::ConsistentIncrease:
+    case TrendVerdict::ConsistentDecrease: return 0;
+    case TrendVerdict::OrderedUntested: return 1;
+    case TrendVerdict::NotSignificant: return 2;
+    case TrendVerdict::SignificantNotMonotonic: return 3;
+    case TrendVerdict::BelowResolution: return 4;
+    case TrendVerdict::NoTrend: return 5;
+    case TrendVerdict::InsufficientData: return 6;
+    }
+    return 7;
+}
+
+static void summarizeAlgorithms(TrendReport &rep)
+{
+    for (const MetricInfo &m : metricInfos()) {
+        AlgorithmTrend a;
+        a.metric = m.name;
+        a.label = m.label;
+        a.algorithm = m.algorithm;
+        bool anyTested = false, anyNoTrend = false;
+        for (size_t f = 0; f < rep.features.size(); ++f) {
+            const FeatureTrend &t = rep.features[f];
+            if (std::find(m.features.begin(), m.features.end(), t.feature) == m.features.end())
+                continue;
+            a.features.push_back(f);
+            a.consistent += t.verdict == TrendVerdict::ConsistentIncrease || t.verdict == TrendVerdict::ConsistentDecrease;
+            a.untested += t.verdict == TrendVerdict::OrderedUntested;
+            anyTested = anyTested || t.verdict == TrendVerdict::NotSignificant ||
+                        t.verdict == TrendVerdict::SignificantNotMonotonic;
+            anyNoTrend = anyNoTrend || t.verdict == TrendVerdict::NoTrend || t.verdict == TrendVerdict::BelowResolution;
+            // best feature: most informative verdict, then the larger effect size, then |rho|
+            if (a.best < 0) {
+                a.best = int(f);
+                continue;
+            }
+            const FeatureTrend &b = rep.features[size_t(a.best)];
+            const int rt = verdictRank(t.verdict), rb = verdictRank(b.verdict);
+            const double dt = std::isfinite(t.effectSize) ? std::fabs(t.effectSize) : 0.0;
+            const double db = std::isfinite(b.effectSize) ? std::fabs(b.effectSize) : 0.0;
+            const double pt = std::isfinite(t.rho) ? std::fabs(t.rho) : 0.0;
+            const double pb = std::isfinite(b.rho) ? std::fabs(b.rho) : 0.0;
+            if (rt < rb || (rt == rb && (dt > db || (dt == db && pt > pb))))
+                a.best = int(f);
+        }
+        if (a.consistent > 0)
+            a.verdict = AlgorithmVerdict::Useful;
+        else if (a.untested > 0)
+            a.verdict = AlgorithmVerdict::Promising;
+        else if (anyTested)
+            a.verdict = AlgorithmVerdict::NotConfirmed;
+        else if (anyNoTrend)
+            a.verdict = AlgorithmVerdict::NoBenefit;
+        else
+            a.verdict = AlgorithmVerdict::InsufficientData;
+        rep.algorithms.push_back(a);
+    }
 }
 
 std::vector<double> averageRanks(const std::vector<double> &v)
@@ -332,8 +407,35 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
         int present = 0;
         for (int c : ft.count)
             present += c > 0;
+        // practical significance: the change from the first to the last category with data
+        // must exceed what the algorithm can resolve
+        double first = nan(), last = nan();
+        for (size_t k = 0; k < ft.mean.size(); ++k)
+            if (ft.count[k] > 0) {
+                if (!std::isfinite(first))
+                    first = ft.mean[k];
+                last = ft.mean[k];
+            }
+        ft.change = last - first;
+        // the relative part refers to the level of the measurement: for a variation feature
+        // (<metric>_std) that is the metric's mean, not the (small) variation itself
+        double scale = std::max(std::fabs(first), std::fabs(last));
+        const std::string metric = featureMetric(ft.feature);
+        if (!metric.empty() && ft.feature == metric + "_std")
+            for (const FeatureTrend &other : rep.features)
+                if (other.feature == metric + "_mean") {
+                    scale = 0.0;
+                    for (size_t k = 0; k < other.mean.size(); ++k)
+                        if (other.count[k] > 0 && std::isfinite(other.mean[k]))
+                            scale = std::max(scale, std::fabs(other.mean[k]));
+                }
+        const Metric::Resolution res = featureResolution(ft.feature);
+        ft.resolution = std::max(res.absolute, res.relative * scale);
+        ft.belowResolution = std::isfinite(ft.change) && std::fabs(ft.change) < ft.resolution;
         if (present < 2 || !std::isfinite(ft.rho))
             ft.verdict = TrendVerdict::InsufficientData;
+        else if (ft.monotonic && ft.belowResolution)
+            ft.verdict = TrendVerdict::BelowResolution;
         else if (!ft.tested)
             ft.verdict = ft.monotonic ? TrendVerdict::OrderedUntested : TrendVerdict::NoTrend;
         else if (ft.pHolm < opt.alpha && ft.monotonic && ft.direction * ft.rho > 0)
@@ -345,6 +447,7 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
         else
             ft.verdict = TrendVerdict::NoTrend;
     }
+    summarizeAlgorithms(rep);
     rep.ok = true;
     return rep;
 }
@@ -366,12 +469,18 @@ bool writeTrendCsv(const TrendReport &rep, const std::string &path, std::string 
         if (error) *error = "Cannot write " + path;
         return false;
     }
-    f << "feature";
+    f << "algorithm,algorithm_verdict,feature";
     for (const std::string &c : rep.categories)
         f << "," << csvEscape(c + "_mean") << "," << csvEscape(c + "_std") << "," << csvEscape(c + "_n");
     f << ",spread_from,spearman_rho,p_value,p_holm,effect_size_d,monotonic,verdict\n";
-    for (const FeatureTrend &t : rep.features) {
-        f << t.feature;
+    for (size_t fi = 0; fi < rep.features.size(); ++fi) {
+        const FeatureTrend &t = rep.features[fi];
+        const AlgorithmTrend *alg = nullptr;
+        for (const AlgorithmTrend &a : rep.algorithms)
+            if (std::find(a.features.begin(), a.features.end(), fi) != a.features.end())
+                alg = &a;
+        f << csvEscape(alg ? alg->algorithm : std::string()) << ","
+          << csvEscape(alg ? algorithmVerdictName(alg->verdict) : "") << "," << t.feature;
         for (size_t k = 0; k < rep.categories.size(); ++k)
             f << "," << num(t.mean[k]) << "," << num(t.std[k]) << "," << t.count[k];
         f << "," << (t.windowSpread ? "windows" : "units") << "," << num(t.rho) << "," << num(t.pValue) << ","

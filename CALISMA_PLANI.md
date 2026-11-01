@@ -13,11 +13,14 @@ anlamlı şekilde değişir?
 
 Türbülansın üç etkisi üç **bağımsız alt çalışmadır**; her biri aşamalardan ayrı ayrı geçer:
 
-| Alt çalışma | Etki | Ölçüm |
+| Alt çalışma | Etki | Ölçümler (algoritmalar) |
 |---|---|---|
-| A | Kayma / titreşim | jitter |
-| B | Bulanıklık | sharpness |
-| C | Parlaklık dalgalanması | intensity / scintillation_index |
+| A | Kayma / titreşim | jitter (phase correlation), centroid, flow (optical flow), change |
+| B | Bulanıklık | sharpness (Laplacian), gradient (Sobel) |
+| C | Parlaklık dalgalanması | intensity (temporal variance), scintillation_index |
+
+Analiz ekranındaki **algoritma karnesi** (Useful / Promising / Not confirmed / No benefit), her alt
+çalışmada hangi algoritmanın işe yaradığını doğrudan gösterir.
 
 Birinin başarısız olması diğerlerini etkilemez ("C işe yaramadı, A çok iyi" geçerli bir sonuçtur).
 
@@ -96,6 +99,10 @@ Her aşamanın sonucu tek satırla not edilir:
 
 | Ölçüm | Doğrulama | Duyarlılık | Sağlamlık | Not |
 |---|---|---|---|---|
-| jitter_std | | | | |
-| sharpness_mean | | | | |
-| scintillation_index | | | | |
+| jitter (phase correlation) | | | | |
+| centroid | | | | |
+| flow (optical flow) | | | | |
+| sharpness (Laplacian) | | | | |
+| gradient (Sobel) | | | | |
+| change (frame difference) | | | | |
+| intensity / scintillation | | | | |

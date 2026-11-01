@@ -66,6 +66,10 @@ static int analyze(const std::string &path, const TrendOptions &opt, const std::
             std::snprintf(p, sizeof(p), "%9s", "-");
         std::printf("  %7.3f %s %7.2f  %s\n", f.rho, p, f.effectSize, verdictName(f.verdict));
     }
+    std::printf("\n%-20s %-48s %-22s %s\n", "algorithm", "method", "verdict", "best feature");
+    for (const AlgorithmTrend &a : rep.algorithms)
+        std::printf("%-20s %-48s %-22s %s\n", a.label.c_str(), a.algorithm.c_str(), algorithmVerdictName(a.verdict),
+                    a.best >= 0 ? rep.features[size_t(a.best)].feature.c_str() : "-");
     if (!outPath.empty() && !writeTrendCsv(rep, outPath, &err)) {
         std::cerr << err << "\n";
         return 1;

@@ -10,6 +10,7 @@
 #include <opencv2/imgcodecs/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -72,13 +73,14 @@ static void writeSequence(const std::string &dir, const Truth &t, int size)
     }
 }
 
-static Truth makeTruth(int n, double jitter, double blur, double gainNoise, unsigned seed)
+static Truth makeTruth(int n, double jitter, double blur, double gainNoise, unsigned seed, bool wholePixels = false)
 {
     cv::RNG rng(seed);
     Truth t;
     for (int i = 0; i < n; ++i) {
-        t.dx.push_back(rng.gaussian(jitter));
-        t.dy.push_back(rng.gaussian(jitter));
+        // whole-pixel shifts avoid the slight smoothing of sub-pixel interpolation
+        t.dx.push_back(wholePixels ? std::round(rng.gaussian(jitter)) : rng.gaussian(jitter));
+        t.dy.push_back(wholePixels ? std::round(rng.gaussian(jitter)) : rng.gaussian(jitter));
         t.gain.push_back(1.0 + rng.gaussian(gainNoise));
         t.blur.push_back(blur);
     }
@@ -91,6 +93,79 @@ static double feature(const WindowResult &w, const std::string &name)
         if (kv.first == name)
             return kv.second;
     return nan();
+}
+
+// One effect changes along LOW -> MEDIUM -> HIGH, everything else stays the same.
+// The analysis must call the algorithms sensitive to that effect useful - and only those.
+static TrendReport runScenario(const std::string &work, const std::string &name, const double jit[3],
+                               const double blur[3], const double flicker[3], bool wholePixels)
+{
+    const std::string results = work + "/scenario_" + name + ".csv";
+    std::remove(results.c_str());
+    const char *cats[3] = {"LOW", "MEDIUM", "HIGH"};
+    for (int k = 0; k < 3; ++k)
+        for (int r = 0; r < 3; ++r) {
+            const std::string dir = work + "/sc_" + name + "_" + cats[k] + "_" + std::to_string(r);
+            writeSequence(dir, makeTruth(32, jit[k], blur[k], flicker[k], unsigned(500 + 10 * k + r), wholePixels), 64);
+            Recording rec;
+            rec.path = dir;
+            rec.category = cats[k];
+            MeasureSettings ms;
+            ms.windowLength = 16;
+            std::string err;
+            const MeasureOutput out = measure(rec, ms, ProgressFn(), nullptr);
+            CHECK(out.ok && appendResults(results, rec, out, &err), name << " " << err);
+        }
+    Table t;
+    std::string err;
+    loadTable(results, t, &err);
+    const TrendReport rep = analyzeTrends(t, TrendOptions());
+    std::printf("  scenario %-8s", name.c_str());
+    for (const AlgorithmTrend &a : rep.algorithms)
+        std::printf(" %s=%s", a.metric.c_str(), algorithmVerdictName(a.verdict));
+    std::printf("\n");
+    return rep;
+}
+
+static AlgorithmVerdict algorithmVerdict(const TrendReport &rep, const std::string &metric)
+{
+    for (const AlgorithmTrend &a : rep.algorithms)
+        if (a.metric == metric)
+            return a.verdict;
+    return AlgorithmVerdict::InsufficientData;
+}
+
+static void testScenarios(const std::string &work)
+{
+    const std::vector<std::string> motion = {"jitter", "centroid", "flow"};
+    const std::vector<std::string> blurMetrics = {"sharpness", "gradient"};
+    {
+        const double jit[3] = {0.3, 1.2, 2.5}, blur[3] = {0, 0, 0}, fl[3] = {0.005, 0.005, 0.005};
+        const TrendReport r = runScenario(work, "jitter", jit, blur, fl, true);
+        for (const std::string &m : motion)
+            CHECK(algorithmVerdict(r, m) == AlgorithmVerdict::Useful, "jitter scenario: " << m << " useful");
+        CHECK(algorithmVerdict(r, "change") == AlgorithmVerdict::Useful, "jitter scenario: change useful");
+        for (const std::string &m : {std::string("sharpness"), std::string("gradient"), std::string("intensity")})
+            CHECK(algorithmVerdict(r, m) != AlgorithmVerdict::Useful, "jitter scenario: " << m << " not useful");
+    }
+    {
+        const double jit[3] = {0, 0, 0}, blur[3] = {0.0, 0.9, 1.8}, fl[3] = {0.005, 0.005, 0.005};
+        const TrendReport r = runScenario(work, "blur", jit, blur, fl, true);
+        for (const std::string &m : blurMetrics)
+            CHECK(algorithmVerdict(r, m) == AlgorithmVerdict::Useful, "blur scenario: " << m << " useful");
+        for (const std::string &m : {std::string("jitter"), std::string("centroid"), std::string("flow"),
+                                     std::string("intensity")})
+            CHECK(algorithmVerdict(r, m) != AlgorithmVerdict::Useful, "blur scenario: " << m << " not useful");
+    }
+    {
+        const double jit[3] = {0, 0, 0}, blur[3] = {0, 0, 0}, fl[3] = {0.002, 0.01, 0.04};
+        const TrendReport r = runScenario(work, "flicker", jit, blur, fl, true);
+        CHECK(algorithmVerdict(r, "intensity") == AlgorithmVerdict::Useful, "flicker scenario: intensity useful");
+        CHECK(algorithmVerdict(r, "change") == AlgorithmVerdict::Useful, "flicker scenario: change useful");
+        for (const std::string &m : {std::string("jitter"), std::string("centroid"), std::string("sharpness"),
+                                     std::string("gradient")})
+            CHECK(algorithmVerdict(r, m) != AlgorithmVerdict::Useful, "flicker scenario: " << m << " not useful");
+    }
 }
 
 int main(int argc, char **argv)
@@ -133,7 +208,10 @@ int main(int argc, char **argv)
         std::string line;
         std::getline(in, line);
         const std::vector<std::string> head = parseCsvLine(line);
-        CHECK(head.size() == 2 + 3 + 1 + 1, "frame csv columns " << line);
+        size_t frameCols = 2;
+        for (const std::unique_ptr<Metric> &m : createMetrics())
+            frameCols += m->frameColumns().size();
+        CHECK(head.size() == frameCols, "frame csv columns " << line);
         double maxErr = 0.0;
         int rows = 0;
         while (std::getline(in, line)) {
@@ -254,6 +332,14 @@ int main(int argc, char **argv)
         CHECK(featureLabel("jitter_mean") == "Jitter - mean" && featureUnit("jitter_mean") == "px", "labels");
         CHECK(featureLabel("scintillation_index") == "Scintillation index", "label of scintillation index");
 
+        // algorithm report: one entry per metric, best feature inside the algorithm
+        CHECK(rep.algorithms.size() == metricInfos().size(), "one algorithm entry per metric");
+        for (const AlgorithmTrend &a : rep.algorithms) {
+            CHECK(a.best >= 0 && std::find(a.features.begin(), a.features.end(), size_t(a.best)) != a.features.end(),
+                  a.metric << " best feature");
+            CHECK(a.verdict == AlgorithmVerdict::Useful, a.metric << " useful on the combined data");
+        }
+
         // reproducible
         const TrendReport again = analyzeTrends(t, TrendOptions());
         CHECK(again.features[0].pValue == rep.features[0].pValue, "fixed seed");
@@ -282,6 +368,8 @@ int main(int argc, char **argv)
             falsePositives += f.verdict == TrendVerdict::ConsistentIncrease ||
                               f.verdict == TrendVerdict::ConsistentDecrease;
         CHECK(falsePositives == 0, "shuffled labels give no consistent trend (" << falsePositives << ")");
+        for (const AlgorithmTrend &a : analyzeTrends(shuffled, TrendOptions()).algorithms)
+            CHECK(a.verdict != AlgorithmVerdict::Useful, "shuffled labels: " << a.metric << " not useful");
 
         // one recording per category: explored (direction, window spread), but not tested
         Table few;
@@ -338,6 +426,8 @@ int main(int argc, char **argv)
         const MeasureOutput out = measure(rec, MeasureSettings(), ProgressFn(), nullptr);
         CHECK(!appendResults(other, rec, out, &err), "different header refused");
     }
+
+    testScenarios(work);
 
     std::cout << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
     return g_failures == 0 ? 0 : 1;
