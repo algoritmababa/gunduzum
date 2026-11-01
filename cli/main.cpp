@@ -1,8 +1,9 @@
 // Command-line front end: measure recordings into the same results table as the GUI,
-// or print the category summary of a results table.
+// or analyze whether the measurements change consistently along the categories.
 
 #include "Measurement.h"
 #include "ResultTable.h"
+#include "TrendAnalysis.h"
 
 #include <cmath>
 #include <cstdio>
@@ -17,7 +18,8 @@ static void usage()
                  "  turbulence_measure --input <folder|video> --results <file.csv>\n"
                  "                     [--category LOW|MEDIUM|HIGH|...] [--note text]\n"
                  "                     [--roi x,y,w,h] [--window frames] [--frames-csv file.csv]\n"
-                 "  turbulence_measure --summary <file.csv> [--order LOW,MEDIUM,HIGH]\n";
+                 "  turbulence_measure --analyze <file.csv> [--order LOW,MEDIUM,HIGH]\n"
+                 "                     [--unit recording|window] [--alpha 0.05] [--out trend.csv]\n";
 }
 
 static std::vector<std::string> split(const std::string &s)
@@ -30,7 +32,7 @@ static std::vector<std::string> split(const std::string &s)
     return out;
 }
 
-static int summary(const std::string &path, const std::vector<std::string> &order)
+static int analyze(const std::string &path, const TrendOptions &opt, const std::string &outPath)
 {
     Table t;
     std::string err;
@@ -38,22 +40,30 @@ static int summary(const std::string &path, const std::vector<std::string> &orde
         std::cerr << err << "\n";
         return 1;
     }
-    const std::vector<std::string> cats = categoriesIn(t, order);
-    std::printf("%-22s", "feature");
-    for (const std::string &c : cats)
-        std::printf("  %-26s", c.c_str());
-    std::printf("  %-11s %s\n", "trend", "separation");
-    for (const CategoryStats &s : categorySummary(t, cats)) {
-        std::printf("%-22s", s.feature.c_str());
-        for (size_t i = 0; i < cats.size(); ++i) {
-            char buf[64];
-            if (s.count[i] > 0)
-                std::snprintf(buf, sizeof(buf), "%.4g +- %.3g (%d)", s.mean[i], s.std[i], s.count[i]);
-            else
-                std::snprintf(buf, sizeof(buf), "-");
-            std::printf("  %-26s", buf);
-        }
-        std::printf("  %-11s %s\n", s.trend.c_str(), s.separation.c_str());
+    const TrendReport rep = analyzeTrends(t, opt);
+    if (!rep.ok) {
+        std::cerr << rep.error << "\n";
+        return 1;
+    }
+    std::printf("%d %s:", rep.units, opt.perRecording ? "recordings" : "windows");
+    for (size_t k = 0; k < rep.categories.size(); ++k)
+        std::printf(" %s=%d", rep.categories[k].c_str(), rep.unitsPerCategory[k]);
+    std::printf("\n");
+    for (const std::string &n : rep.notes)
+        std::printf("note: %s\n", n.c_str());
+    std::printf("%-20s", "measurement");
+    for (const std::string &c : rep.categories)
+        std::printf("  %-12s", c.c_str());
+    std::printf("  %7s %9s %7s  %s\n", "rho", "p(Holm)", "d", "verdict");
+    for (const FeatureTrend &f : rep.features) {
+        std::printf("%-20s", f.feature.c_str());
+        for (size_t k = 0; k < rep.categories.size(); ++k)
+            std::printf("  %-12.4g", f.mean[k]);
+        std::printf("  %7.3f %9.3g %7.2f  %s\n", f.rho, f.pHolm, f.effectSize, verdictName(f.verdict));
+    }
+    if (!outPath.empty() && !writeTrendCsv(rep, outPath, &err)) {
+        std::cerr << err << "\n";
+        return 1;
     }
     return 0;
 }
@@ -62,8 +72,8 @@ int main(int argc, char **argv)
 {
     Recording rec;
     MeasureSettings settings;
-    std::string results, summaryPath;
-    std::vector<std::string> order = {"LOW", "MEDIUM", "HIGH"};
+    std::string results, analyzePath, outPath;
+    TrendOptions trend;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -88,10 +98,16 @@ int main(int argc, char **argv)
             settings.windowLength = std::atoi(v.c_str());
         else if (a == "--frames-csv")
             settings.frameCsvPath = v;
-        else if (a == "--summary")
-            summaryPath = v;
+        else if (a == "--analyze")
+            analyzePath = v;
         else if (a == "--order")
-            order = split(v);
+            trend.categoryOrder = split(v);
+        else if (a == "--unit")
+            trend.perRecording = v != "window";
+        else if (a == "--alpha")
+            trend.alpha = std::atof(v.c_str());
+        else if (a == "--out")
+            outPath = v;
         else if (a == "--roi") {
             if (std::sscanf(v.c_str(), "%d,%d,%d,%d", &rec.roi.x, &rec.roi.y, &rec.roi.width, &rec.roi.height) != 4) {
                 std::cerr << "--roi expects x,y,w,h\n";
@@ -104,8 +120,8 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!summaryPath.empty())
-        return summary(summaryPath, order);
+    if (!analyzePath.empty())
+        return analyze(analyzePath, trend, outPath);
     if (rec.path.empty() || results.empty()) {
         usage();
         return 2;

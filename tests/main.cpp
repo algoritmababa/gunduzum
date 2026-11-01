@@ -5,6 +5,7 @@
 #include "Measurement.h"
 #include "ResultTable.h"
 #include "Stats.h"
+#include "TrendAnalysis.h"
 
 #include <opencv2/imgcodecs/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -178,7 +179,7 @@ int main(int argc, char **argv)
     const char *cats[3] = {"LOW", "MEDIUM", "HIGH"};
     const double jit[3] = {0.2, 0.8, 1.6}, blur[3] = {0.0, 0.8, 1.6}, flicker[3] = {0.002, 0.01, 0.04};
     for (int k = 0; k < 3; ++k)
-        for (int r = 0; r < 2; ++r) {
+        for (int r = 0; r < 3; ++r) {
             const std::string dir = work + "/" + cats[k] + "_" + std::to_string(r);
             writeSequence(dir, makeTruth(32, jit[k], blur[k], flicker[k], unsigned(100 + 10 * k + r)), 64);
             Recording rec;
@@ -202,22 +203,81 @@ int main(int argc, char **argv)
     std::string err;
     CHECK(loadTable(results, t, &err), err);
     CHECK(t.header == resultColumns(), "header");
-    CHECK(t.rows.size() == 12, "12 windows appended " << t.rows.size());
+    CHECK(t.rows.size() == 18, "18 windows appended " << t.rows.size());
     CHECK(t.rows[0][size_t(t.column("note"))] == "synthetic, run 0, \"quoted\"", "note round trip");
 
-    const std::vector<std::string> order = categoriesIn(t, {"LOW", "MEDIUM", "HIGH"});
-    CHECK(order == std::vector<std::string>({"LOW", "MEDIUM", "HIGH"}), "category order");
-    for (const CategoryStats &s : categorySummary(t, order)) {
-        std::printf("  %-20s %-11s %-11s", s.feature.c_str(), s.trend.c_str(), s.separation.c_str());
-        for (size_t i = 0; i < order.size(); ++i)
-            std::printf("  %s %.4g", order[i].c_str(), s.mean[i]);
-        std::printf("\n");
-        if (s.feature == "jitter_mean")
-            CHECK(s.trend == "increasing", "jitter rises with the category");
-        if (s.feature == "sharpness_mean")
-            CHECK(s.trend == "decreasing" && s.separation == "clear", "sharpness falls with the category");
-        if (s.feature == "scintillation_index")
-            CHECK(s.trend == "increasing", "scintillation rises with the category");
+    // --- trend analysis ---------------------------------------------------------------------
+    {
+        // helpers
+        const std::vector<double> r = averageRanks({10, 20, 20, 5});
+        CHECK(r == std::vector<double>({2, 3.5, 3.5, 1}), "average ranks with ties");
+        CHECK_NEAR(spearman({1, 2, 3, 4}, {10, 20, 30, 40}), 1.0, 1e-12, "spearman +1");
+        CHECK_NEAR(spearman({1, 2, 3, 4}, {4, 3, 2, 1}), -1.0, 1e-12, "spearman -1");
+        const std::vector<double> h = holmAdjust({0.01, 0.04, 0.03});
+        CHECK_NEAR(h[0], 0.03, 1e-12, "holm smallest");
+        CHECK_NEAR(h[2], 0.06, 1e-12, "holm middle");
+        CHECK_NEAR(h[1], 0.06, 1e-12, "holm monotone");
+    }
+    {
+        // 3 recordings per category: the effects the data were built with must be found,
+        // a measurement without a built-in difference must not
+        const TrendReport rep = analyzeTrends(t, TrendOptions());
+        CHECK(rep.ok, rep.error);
+        CHECK(rep.units == 9 && rep.unitsPerCategory == std::vector<int>({3, 3, 3}), "recordings as units");
+        for (const FeatureTrend &f : rep.features) {
+            std::printf("  %-20s rho %+.2f  p(Holm) %.4f  d %+8.2f  %s\n", f.feature.c_str(), f.rho, f.pHolm,
+                        f.effectSize, verdictName(f.verdict));
+            if (f.feature == "jitter_mean" || f.feature == "jitter_std" || f.feature == "scintillation_index")
+                CHECK(f.verdict == TrendVerdict::ConsistentIncrease, f.feature << " increases");
+            if (f.feature == "sharpness_mean")
+                CHECK(f.verdict == TrendVerdict::ConsistentDecrease, "sharpness decreases");
+            if (f.feature == "intensity_mean") // gain noise only, no built-in level difference
+                CHECK(f.verdict != TrendVerdict::ConsistentIncrease && f.verdict != TrendVerdict::ConsistentDecrease,
+                      "no false trend for intensity_mean");
+        }
+        // reproducible
+        const TrendReport again = analyzeTrends(t, TrendOptions());
+        CHECK(again.features[0].pValue == rep.features[0].pValue, "fixed seed");
+
+        // window units: 18 units, note about optimism
+        TrendOptions wopt;
+        wopt.perRecording = false;
+        const TrendReport wrep = analyzeTrends(t, wopt);
+        CHECK(wrep.ok && wrep.units == 18 && !wrep.notes.empty(), "window units");
+
+        std::string err2;
+        CHECK(writeTrendCsv(rep, work + "/trend.csv", &err2), err2);
+
+        // shuffled labels: no consistent trend should survive
+        Table shuffled = t;
+        const int cc = t.column("category");
+        const char *perm[9] = {"MEDIUM", "HIGH", "LOW", "HIGH", "LOW", "MEDIUM", "LOW", "MEDIUM", "HIGH"};
+        for (std::vector<std::string> &row : shuffled.rows) {
+            const std::string src = row[size_t(t.column("source"))];
+            const int k = src.find("LOW") != std::string::npos ? 0 : (src.find("MEDIUM") != std::string::npos ? 1 : 2);
+            const int rr = src.back() - '0';
+            row[size_t(cc)] = perm[k * 3 + rr];
+        }
+        int falsePositives = 0;
+        for (const FeatureTrend &f : analyzeTrends(shuffled, TrendOptions()).features)
+            falsePositives += f.verdict == TrendVerdict::ConsistentIncrease ||
+                              f.verdict == TrendVerdict::ConsistentDecrease;
+        CHECK(falsePositives == 0, "shuffled labels give no consistent trend (" << falsePositives << ")");
+
+        // too little data: 1 recording per category
+        Table few;
+        few.header = t.header;
+        for (const std::vector<std::string> &row : t.rows)
+            if (row[size_t(t.column("source"))].back() == '0')
+                few.rows.push_back(row);
+        const TrendReport frep = analyzeTrends(few, TrendOptions());
+        CHECK(frep.ok && frep.features[0].verdict == TrendVerdict::InsufficientData, "insufficient data");
+
+        // custom order with a missing category is still analyzed (LOW vs HIGH)
+        TrendOptions two;
+        two.categoryOrder = {"LOW", "HIGH", "EXTREME"};
+        const TrendReport trep = analyzeTrends(t, two);
+        CHECK(trep.ok && trep.categories.size() == 2 && !trep.notes.empty(), "partial order");
     }
 
     // a results file with other columns is refused

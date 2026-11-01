@@ -1,13 +1,8 @@
 #include "ResultTable.h"
 
-#include "Stats.h"
-
-#include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <ctime>
 #include <fstream>
-#include <set>
 #include <sstream>
 
 namespace turb {
@@ -143,66 +138,6 @@ bool loadTable(const std::string &csvPath, Table &table, std::string *error)
         if (!line.empty())
             table.rows.push_back(parseCsvLine(line));
     return true;
-}
-
-std::vector<std::string> categoriesIn(const Table &table, const std::vector<std::string> &preferredOrder)
-{
-    const int cc = table.column("category");
-    std::set<std::string> present;
-    if (cc >= 0)
-        for (const std::vector<std::string> &r : table.rows)
-            if (size_t(cc) < r.size() && !r[size_t(cc)].empty())
-                present.insert(r[size_t(cc)]);
-    std::vector<std::string> out;
-    for (const std::string &c : preferredOrder)
-        if (present.erase(c))
-            out.push_back(c);
-    out.insert(out.end(), present.begin(), present.end());
-    return out;
-}
-
-std::vector<CategoryStats> categorySummary(const Table &table, const std::vector<std::string> &categoryOrder)
-{
-    std::vector<CategoryStats> result;
-    const int cc = table.column("category");
-    if (cc < 0)
-        return result;
-    for (const std::string &feature : featureNames()) {
-        const int fc = table.column(feature);
-        if (fc < 0)
-            continue;
-        CategoryStats st;
-        st.feature = feature;
-        for (const std::string &cat : categoryOrder) {
-            std::vector<double> v;
-            for (const std::vector<std::string> &r : table.rows)
-                if (size_t(std::max(cc, fc)) < r.size() && r[size_t(cc)] == cat)
-                    v.push_back(std::strtod(r[size_t(fc)].c_str(), nullptr)); // "NaN" parses as NaN
-            const Summary s = summarize(v);
-            st.mean.push_back(s.mean);
-            st.std.push_back(s.std);
-            st.count.push_back(s.count);
-        }
-
-        // neighbouring categories that have data
-        std::vector<size_t> idx;
-        for (size_t i = 0; i < st.count.size(); ++i)
-            if (st.count[i] > 0)
-                idx.push_back(i);
-        if (idx.size() >= 2) {
-            bool up = true, down = true, clear = true;
-            for (size_t k = 1; k < idx.size(); ++k) {
-                const size_t a = idx[k - 1], b = idx[k];
-                up = up && st.mean[b] > st.mean[a];
-                down = down && st.mean[b] < st.mean[a];
-                clear = clear && std::fabs(st.mean[b] - st.mean[a]) > st.std[a] + st.std[b];
-            }
-            st.trend = up ? "increasing" : (down ? "decreasing" : "mixed");
-            st.separation = clear ? "clear" : "overlapping";
-        }
-        result.push_back(st);
-    }
-    return result;
 }
 
 } // namespace turb

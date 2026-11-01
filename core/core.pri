@@ -63,11 +63,13 @@ HEADERS += \
     $$PWD/Stats.h \
     $$PWD/Metrics.h \
     $$PWD/Measurement.h \
-    $$PWD/ResultTable.h
+    $$PWD/ResultTable.h \
+    $$PWD/TrendAnalysis.h
 
 SOURCES += \
     $$PWD/FrameSource.cpp \
     $$PWD/Stats.cpp \
     $$PWD/Metrics.cpp \
     $$PWD/Measurement.cpp \
-    $$PWD/ResultTable.cpp
+    $$PWD/ResultTable.cpp \
+    $$PWD/TrendAnalysis.cpp

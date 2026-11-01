@@ -75,14 +75,16 @@ HEADERS += \
     core/Stats.h \
     core/Metrics.h \
     core/Measurement.h \
-    core/ResultTable.h
+    core/ResultTable.h \
+    core/TrendAnalysis.h
 
 SOURCES += \
     core/FrameSource.cpp \
     core/Stats.cpp \
     core/Metrics.cpp \
     core/Measurement.cpp \
-    core/ResultTable.cpp
+    core/ResultTable.cpp \
+    core/TrendAnalysis.cpp
 
 # Qt Widgets GUI
 HEADERS += \

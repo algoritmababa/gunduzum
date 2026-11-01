@@ -53,12 +53,14 @@ hava (sıcaklık, rüzgâr), pozlama/kazanç, varsa Cn² / r0 ölçümü.
 ## Aşama 3 — Duyarlılık
 **Soru:** Ölçüm türbülans kategorisiyle değişiyor mu?
 
-Uygulamadaki **Category summary** sekmesi bu aşamanın aracıdır:
-- *Trend*: kategori ortalamaları LOW → HIGH sırasıyla tutarlı şekilde artıyor/azalıyor mu?
-- *Separation*: komşu kategoriler arasındaki fark, kategori içi yayılımdan büyük mü?
+Uygulamadaki **Trend analysis** sekmesi (ANALYZE) bu aşamanın aracıdır. Kayıt bazında
+(her kaydın pencereleri ortalanarak):
+- kategori ortalamaları LOW → MEDIUM → HIGH sırasıyla artıyor/azalıyor mu?
+- bu eğilim tesadüf olabilir mi? (Spearman ρ, permütasyon testi, Holm düzeltmesi)
+- LOW–HIGH farkı, kategori içi yayılıma göre ne kadar büyük? (d)
 
-**Geçiş:** trend tutarlı (increasing/decreasing) ve ayrışma en azından LOW–HIGH arasında açık.
-Sonuç, pencereler değil **kayıtlar** bazında da aynı olmalı (aynı kaydın pencereleri birbirine benzer).
+**Geçiş:** Verdict = *consistent increase* veya *consistent decrease*. Kategori başına en az 3 kayıt
+gerekir; daha azıyla analiz "insufficient data" veya "not significant" der.
 
 ## Aşama 4 — Sağlamlık
 **Soru:** Değişimin sebebi gerçekten türbülans mı?

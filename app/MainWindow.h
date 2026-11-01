@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include "Measurement.h"
+#include "TrendAnalysis.h"
 
 #include <QMainWindow>
 
@@ -9,6 +10,7 @@ class MeasureWorker;
 class RoiView;
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -43,6 +45,9 @@ private slots:
     void onProgress(int done, int total);
     void onDone(bool ok, const QString &message);
     void reloadResults();
+    void chooseAnalysisFile();
+    void analyze();
+    void saveAnalysis();
 
 private:
     bool openRecording(const QString &path);
@@ -68,7 +73,14 @@ private:
     QTabWidget *m_tabs;
     RoiView *m_view;
     QTableWidget *m_results;
-    QTableWidget *m_summary;
+    // trend analysis (on demand)
+    QLineEdit *m_analysisFile;
+    QComboBox *m_unit;
+    QDoubleSpinBox *m_alpha;
+    QLabel *m_trendInfo;
+    QTableWidget *m_trend;
+    QPushButton *m_saveAnalysis;
+    turb::TrendReport m_trendReport;
     QPlainTextEdit *m_log;
 
     QString m_path;
