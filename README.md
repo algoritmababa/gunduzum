@@ -33,29 +33,36 @@ Sekmeler: **Results** (sonuç dosyasının içeriği), **Trend analysis** (aşa�
 
 ## Trend analizi (istendiğinde, CSV üzerinden)
 
-**Trend analysis** sekmesinde bir sonuç CSV'si seçilip **ANALYZE**'a basılınca, etiketli satırlar
+**Trend analysis** sekmesinde sonuç CSV'si seçilip **Analyze**'a basılınca, etiketli satırlar
 üzerinden her ölçüm için "LOW → MEDIUM → HIGH yönünde tutarlı bir değişim var mı?" sorusu
 cevaplanır. Kategori sırası, Label alanındaki listenin sırasıdır; etiketsiz satırlar ve sıra dışı
 kategoriler kullanılmaz.
 
-| Sütun | Anlamı |
-|---|---|
-| **Verdict** | consistent increase / consistent decrease / ordered, not significant / significant, not monotonic / no consistent trend / insufficient data |
-| **rho** | Spearman sıra korelasyonu: değer ile kategori sırası (+1 hep artıyor, −1 hep azalıyor, 0 ilişki yok) |
-| **p (Holm)** | Permütasyon testi (etiketler 10.000 kez karıştırılır, sabit tohum → tekrarlanabilir); tüm ölçümler birlikte test edildiği için Holm düzeltmeli |
-| **d** | İlk ve son kategori arasındaki fark / kategori içi yayılım (Cohen's d) |
-| kategori sütunları | ortalama ± std (n) |
+Ekran:
+
+* **Özet şeridi**: kaç kayıt (kategori başına), kaç ölçüm tutarlı artıyor / azalıyor / anlamlı değil /
+  eğilim yok; veri yetersizse sarı uyarı.
+* **Ölçüm listesi** (sol): her ölçüm için sonuç etiketi ve `LOW → MEDIUM → HIGH` değer akışı;
+  kategorilerin birbirine karışıp karışmadığı (● categories apart / ◑ n overlapping).
+* **Ayrıntı** (sağ, seçilen ölçüm):
+  * sonucu düz cümleyle anlatan renkli kutu;
+  * dört gösterge: eğilim gücü (ρ), tesadüf olasılığı (p, Holm düzeltmeli), LOW–HIGH farkı (d),
+    toplam değişim (%);
+  * **kategori kartları** ve aralarında yüzde değişimli oklar (genel eğilimle aynı yöndeyse yeşil,
+    tersiyse kırmızı); her kartta ortalama ± std, CV, aralık ve **kategori içi tutarlılık**
+    ("consistent" = kategorinin hiçbir kaydı komşu kategorinin değer aralığına girmiyor);
+  * **kayıtlar tablosu**: her kaydın değeri, komşu kategoriye karışan kayıtlar ⚠ ile işaretli,
+    **kayıt içi kararlılık** (aynı kaydın pencereleri arasındaki değişim, CV %) ve not.
 
 "Consistent" kararı için iki koşul birlikte gerekir: kategori ortalamaları sırayla artıyor/azalıyor
-**ve** düzeltilmiş p < alpha (varsayılan 0.05).
+**ve** düzeltilmiş p < α (varsayılan 0.05). İstatistikler: Spearman sıra korelasyonu, permütasyon
+testi (10.000 karıştırma, sabit tohum → tekrarlanabilir), Holm düzeltmesi, Cohen's d.
 
 * **Analiz birimi kayıttır** (varsayılan): her kaydın pencereleri ortalanır, çünkü aynı kaydın
   pencereleri birbirine benzer ve ayrı örnek sayılırsa sonuç olduğundan güçlü görünür.
-  "Window" seçeneği vardır ama iyimserdir.
-* **Ne kadar veri gerekir?** Her kategoride en az 2 kayıt gerekir. 10 ölçüm birlikte test edildiği
-  için, kategori başına 2 kayıtla (6 kayıt) hiçbir sonuç anlamlı çıkamaz; **kategori başına 3 kayıt**
-  (9 kayıt) ilk anlamlı sonuçları verebilir. Az veri durumunda uygulama bunu not olarak yazar.
-* Sonuç **Save analysis CSV…** ile kaydedilir (`<sonuç>_trend.csv`).
+* **Ne kadar veri gerekir?** Her kategoride en az 2 kayıt; anlamlı sonuç için **kategori başına
+  3 kayıt** (10 ölçüm birlikte test edildiği için 2'şer kayıtla hiçbir sonuç anlamlı çıkamaz).
+* Sonuç **Save CSV…** ile kaydedilir (`<sonuç>_trend.csv`); komut satırı: `--analyze`.
 
 ## Sonuç tablosu (ortak veri sözleşmesi)
 
@@ -102,7 +109,7 @@ core/   saf C++11 + OpenCV
   ResultTable    ortak CSV tablosu
   TrendAnalysis  kategori sırasıyla tutarlı değişim analizi (Spearman, permütasyon, Holm, d)
   Stats          mean / std / P95
-app/    Qt arayüzü (MainWindow, MeasureWorker, RoiView)
+app/    Qt arayüzü (MainWindow, MeasureWorker, RoiView, TrendView)
 cli/    komut satırı
 tests/  otomatik testler
 ```

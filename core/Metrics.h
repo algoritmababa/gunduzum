@@ -26,6 +26,7 @@ public:
 
     virtual std::string name() const = 0;        // short id, used as column prefix
     virtual std::string description() const = 0; // one sentence: what it measures
+    virtual std::string label() const = 0;       // human readable name, e.g. "Jitter"
     virtual std::string unit() const { return std::string(); }
 
     // Per-frame columns written to the frame-level CSV (the first one is summarized).
@@ -44,6 +45,7 @@ public:
 class JitterMetric : public Metric {
 public:
     std::string name() const override { return "jitter"; }
+    std::string label() const override { return "Jitter"; }
     std::string description() const override;
     std::string unit() const override { return "px"; }
     std::vector<std::string> frameColumns() const override { return {"jitter", "dx", "dy"}; }
@@ -58,6 +60,7 @@ private:
 class SharpnessMetric : public Metric {
 public:
     std::string name() const override { return "sharpness"; }
+    std::string label() const override { return "Sharpness"; }
     std::string description() const override;
     void reset() override {}
     void process(const cv::Mat &gray32f, std::vector<double> &values) override;
@@ -71,6 +74,7 @@ private:
 class IntensityMetric : public Metric {
 public:
     std::string name() const override { return "intensity"; }
+    std::string label() const override { return "Brightness"; }
     std::string description() const override;
     void reset() override {}
     void process(const cv::Mat &gray32f, std::vector<double> &values) override;
@@ -82,6 +86,12 @@ std::vector<std::unique_ptr<Metric> > createMetrics();
 
 // Names of all summary features, in column order (derived from the metrics).
 std::vector<std::string> featureNames();
+
+// Readable name ("Jitter - mean") and unit ("px") of a summary feature.
+std::string featureLabel(const std::string &feature);
+std::string featureUnit(const std::string &feature);
+// What the feature tells about turbulence, in one short sentence.
+std::string featureMeaning(const std::string &feature);
 
 } // namespace turb
 

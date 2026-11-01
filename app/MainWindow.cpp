@@ -5,6 +5,7 @@
 #include "Metrics.h"
 #include "ResultTable.h"
 #include "RoiView.h"
+#include "TrendView.h"
 
 #include <opencv2/imgproc/imgproc.hpp>
 
@@ -13,12 +14,9 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
-#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
-#include <QBrush>
-#include <QColor>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -139,7 +137,7 @@ MainWindow::MainWindow(QWidget *parent)
     QPushButton *bRes = new QPushButton(tr("..."));
     connect(bRes, &QPushButton::clicked, this, &MainWindow::chooseResultsFile);
     connect(m_resultsEdit, &QLineEdit::editingFinished, this, [this]() {
-        m_analysisFile->setText(m_resultsEdit->text());
+        m_trendView->setCsvPath(m_resultsEdit->text());
         reloadResults();
     });
     resRow->addWidget(m_resultsEdit, 1);
@@ -191,58 +189,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_results->verticalHeader()->setVisible(false);
     m_tabs->addTab(m_results, tr("Results"));
 
-    QWidget *trendPage = new QWidget;
-    QVBoxLayout *tv = new QVBoxLayout(trendPage);
-    QLabel *trendHelp = new QLabel(
-        tr("Does a measurement change consistently along the category order (LOW -> MEDIUM -> HIGH)? "
-           "Runs on the labeled rows of a results CSV when you press ANALYZE.<br>"
-           "<b>rho</b>: Spearman rank correlation with the category order (+1 rising, -1 falling). "
-           "<b>p (Holm)</b>: chance of a trend this strong with shuffled labels (permutation test, corrected "
-           "for testing all measurements). <b>d</b>: LOW-HIGH difference in units of the spread inside the "
-           "categories."));
-    trendHelp->setWordWrap(true);
-    tv->addWidget(trendHelp);
-    QHBoxLayout *fileRow = new QHBoxLayout;
-    fileRow->addWidget(new QLabel(tr("CSV")));
-    m_analysisFile = new QLineEdit(m_resultsEdit->text());
-    QPushButton *bAnaFile = new QPushButton(tr("..."));
-    connect(bAnaFile, &QPushButton::clicked, this, &MainWindow::chooseAnalysisFile);
-    fileRow->addWidget(m_analysisFile, 1);
-    fileRow->addWidget(bAnaFile);
-    tv->addLayout(fileRow);
-    QHBoxLayout *optRow = new QHBoxLayout;
-    optRow->addWidget(new QLabel(tr("Unit")));
-    m_unit = new QComboBox;
-    m_unit->addItem(tr("Recording (windows averaged) - recommended"));
-    m_unit->addItem(tr("Window (optimistic)"));
-    m_unit->setToolTip(tr("Windows of the same recording are similar, so counting them as independent "
-                          "samples overstates the evidence."));
-    optRow->addWidget(m_unit);
-    optRow->addWidget(new QLabel(tr("alpha")));
-    m_alpha = new QDoubleSpinBox;
-    m_alpha->setRange(0.001, 0.2);
-    m_alpha->setDecimals(3);
-    m_alpha->setSingleStep(0.01);
-    m_alpha->setValue(0.05);
-    m_alpha->setToolTip(tr("Significance level for the Holm-adjusted p-value."));
-    optRow->addWidget(m_alpha);
-    optRow->addStretch(1);
-    QPushButton *bAnalyze = new QPushButton(tr("ANALYZE"));
-    bAnalyze->setMinimumWidth(120);
-    connect(bAnalyze, &QPushButton::clicked, this, &MainWindow::analyze);
-    m_saveAnalysis = new QPushButton(tr("Save analysis CSV..."));
-    m_saveAnalysis->setEnabled(false);
-    connect(m_saveAnalysis, &QPushButton::clicked, this, &MainWindow::saveAnalysis);
-    optRow->addWidget(bAnalyze);
-    optRow->addWidget(m_saveAnalysis);
-    tv->addLayout(optRow);
-    m_trendInfo = new QLabel;
-    m_trendInfo->setWordWrap(true);
-    tv->addWidget(m_trendInfo);
-    m_trend = new QTableWidget;
-    m_trend->verticalHeader()->setVisible(false);
-    tv->addWidget(m_trend, 1);
-    m_tabs->addTab(trendPage, tr("Trend analysis"));
+    m_trendView = new TrendView;
+    m_trendView->setCsvPath(m_resultsEdit->text());
+    m_trendView->setCategoryOrderProvider([this]() { return categoryOrder(); });
+    connect(m_trendView, &TrendView::logMessage, this, &MainWindow::log);
+    m_tabs->addTab(m_trendView, tr("Trend analysis"));
 
     m_log = new QPlainTextEdit;
     m_log->setReadOnly(true);
@@ -372,7 +323,7 @@ void MainWindow::chooseResultsFile()
     if (f.isEmpty())
         return;
     m_resultsEdit->setText(f);
-    m_analysisFile->setText(f);
+    m_trendView->setCsvPath(f);
     QSettings().setValue("resultsFile", f);
     reloadResults();
 }
@@ -507,113 +458,4 @@ void MainWindow::reloadResults()
             m_results->setItem(r, c, cell(text));
         }
     m_results->resizeColumnsToContents();
-
-}
-
-void MainWindow::chooseAnalysisFile()
-{
-    const QString f = QFileDialog::getOpenFileName(this, tr("Results CSV to analyze"), m_analysisFile->text(),
-                                                   tr("CSV (*.csv)"));
-    if (!f.isEmpty())
-        m_analysisFile->setText(f);
-}
-
-void MainWindow::analyze()
-{
-    const QString path = m_analysisFile->text().trimmed();
-    turb::Table table;
-    std::string err;
-    if (path.isEmpty() || !turb::loadTable(path.toStdString(), table, &err)) {
-        QMessageBox::warning(this, tr("Trend analysis"), err.empty() ? tr("Choose a results CSV.")
-                                                                     : QString::fromStdString(err));
-        return;
-    }
-    turb::TrendOptions opt;
-    opt.categoryOrder.clear();
-    for (const QString &c : categoryOrder())
-        opt.categoryOrder.push_back(c.toStdString());
-    opt.perRecording = m_unit->currentIndex() == 0;
-    opt.alpha = m_alpha->value();
-    m_trendReport = turb::analyzeTrends(table, opt);
-    m_saveAnalysis->setEnabled(m_trendReport.ok);
-    m_trend->clear();
-    m_trend->setRowCount(0);
-    if (!m_trendReport.ok) {
-        m_trendInfo->setText(QString::fromStdString(m_trendReport.error));
-        log(tr("Trend analysis: %1").arg(QString::fromStdString(m_trendReport.error)));
-        return;
-    }
-    const turb::TrendReport &rep = m_trendReport;
-
-    QStringList counts;
-    for (size_t k = 0; k < rep.categories.size(); ++k)
-        counts << QString("%1: %2").arg(QString::fromStdString(rep.categories[k])).arg(rep.unitsPerCategory[k]);
-    QString info = tr("%1 %2 used (%3).")
-                       .arg(rep.units)
-                       .arg(opt.perRecording ? tr("recordings") : tr("windows"))
-                       .arg(counts.join(", "));
-    for (const std::string &n : rep.notes)
-        info += "<br><i>" + QString::fromStdString(n).toHtmlEscaped() + "</i>";
-    m_trendInfo->setText(info);
-
-    const int K = int(rep.categories.size());
-    m_trend->setColumnCount(K + 5);
-    m_trend->setRowCount(int(rep.features.size()));
-    QStringList h;
-    h << tr("Measurement") << tr("Verdict") << tr("rho") << tr("p (Holm)") << tr("d");
-    for (const std::string &c : rep.categories)
-        h << QString::fromStdString(c) + tr(" (mean +- std, n)");
-    m_trend->setHorizontalHeaderLabels(h);
-    for (int r = 0; r < int(rep.features.size()); ++r) {
-        const turb::FeatureTrend &t = rep.features[size_t(r)];
-        m_trend->setItem(r, 0, cell(QString::fromStdString(t.feature)));
-        for (int k = 0; k < K; ++k)
-            m_trend->setItem(r, k + 5,
-                             cell(t.count[size_t(k)] > 0 ? QString("%1 +- %2  (%3)")
-                                                                .arg(num(t.mean[size_t(k)]), num(t.std[size_t(k)]))
-                                                                .arg(t.count[size_t(k)])
-                                                          : QString("-")));
-        m_trend->setItem(r, 2, cell(num(t.rho)));
-        m_trend->setItem(r, 3, cell(QString::number(t.pHolm, 'g', 3)));
-        m_trend->setItem(r, 4, cell(num(t.effectSize)));
-        QString verdict = QString::fromStdString(turb::verdictName(t.verdict));
-        if (t.verdict == turb::TrendVerdict::ConsistentIncrease)
-            verdict = QString::fromUtf8("\xe2\x86\x91 ") + verdict;
-        else if (t.verdict == turb::TrendVerdict::ConsistentDecrease)
-            verdict = QString::fromUtf8("\xe2\x86\x93 ") + verdict;
-        QTableWidgetItem *v = cell(verdict);
-        if (t.verdict == turb::TrendVerdict::ConsistentIncrease || t.verdict == turb::TrendVerdict::ConsistentDecrease) {
-            QFont f = v->font();
-            f.setBold(true);
-            v->setFont(f);
-            v->setForeground(QBrush(QColor(0, 130, 0)));
-        }
-        m_trend->setItem(r, 1, v);
-    }
-    m_trend->resizeColumnsToContents();
-    int consistent = 0;
-    for (const turb::FeatureTrend &t : rep.features)
-        consistent += (t.verdict == turb::TrendVerdict::ConsistentIncrease ||
-                       t.verdict == turb::TrendVerdict::ConsistentDecrease);
-    log(tr("Trend analysis of %1: %2 unit(s), %3 measurement(s) with a consistent trend")
-            .arg(path)
-            .arg(rep.units)
-            .arg(consistent));
-}
-
-void MainWindow::saveAnalysis()
-{
-    if (!m_trendReport.ok)
-        return;
-    const QFileInfo src(m_analysisFile->text().trimmed());
-    const QString f = QFileDialog::getSaveFileName(this, tr("Save trend analysis"),
-                                                   src.absolutePath() + "/" + src.completeBaseName() + "_trend.csv",
-                                                   tr("CSV (*.csv)"));
-    if (f.isEmpty())
-        return;
-    std::string err;
-    if (turb::writeTrendCsv(m_trendReport, f.toStdString(), &err))
-        log(tr("Trend analysis saved: %1").arg(f));
-    else
-        QMessageBox::warning(this, tr("Trend analysis"), QString::fromStdString(err));
 }

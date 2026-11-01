@@ -235,6 +235,25 @@ int main(int argc, char **argv)
                 CHECK(f.verdict != TrendVerdict::ConsistentIncrease && f.verdict != TrendVerdict::ConsistentDecrease,
                       "no false trend for intensity_mean");
         }
+        // per-recording details used by the GUI
+        CHECK(rep.unitList.size() == 9, "unit list");
+        for (const TrendUnit &u : rep.unitList)
+            CHECK(u.windows == 2 && u.value.size() == featureNames().size() && u.windowCv.size() == u.value.size(),
+                  "unit " << u.id);
+        for (const FeatureTrend &f : rep.features) {
+            int overlap = 0;
+            for (int n : f.overlapping)
+                overlap += n;
+            for (size_t k = 0; k < f.count.size(); ++k)
+                CHECK(f.minValue[k] <= f.mean[k] && f.mean[k] <= f.maxValue[k], "range " << f.feature);
+            if (f.feature == "jitter_mean" || f.feature == "sharpness_mean")
+                CHECK(overlap == 0, f.feature << ": categories do not overlap");
+            if (f.feature == "intensity_mean")
+                CHECK(overlap > 0, "intensity_mean: categories overlap");
+        }
+        CHECK(featureLabel("jitter_mean") == "Jitter - mean" && featureUnit("jitter_mean") == "px", "labels");
+        CHECK(featureLabel("scintillation_index") == "Scintillation index", "label of scintillation index");
+
         // reproducible
         const TrendReport again = analyzeTrends(t, TrendOptions());
         CHECK(again.features[0].pValue == rep.features[0].pValue, "fixed seed");

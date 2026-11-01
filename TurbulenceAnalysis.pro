@@ -90,10 +90,12 @@ SOURCES += \
 HEADERS += \
     app/MainWindow.h \
     app/MeasureWorker.h \
-    app/RoiView.h
+    app/RoiView.h \
+    app/TrendView.h
 
 SOURCES += \
     app/main.cpp \
     app/MainWindow.cpp \
     app/MeasureWorker.cpp \
-    app/RoiView.cpp
+    app/RoiView.cpp \
+    app/TrendView.cpp

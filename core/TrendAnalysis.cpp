@@ -132,6 +132,10 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
     std::vector<int> unitCat;                       // category rank of every unit (0-based)
     std::vector<std::vector<double> > unitValues;   // [unit][feature]
     {
+        const int cRec = table.column("recording"), cNote = table.column("note"), cWin = table.column("window");
+        auto field = [](const std::vector<std::string> &r, int c) {
+            return (c >= 0 && size_t(c) < r.size()) ? r[size_t(c)] : std::string();
+        };
         std::map<std::pair<std::string, int>, size_t> unitOf;
         std::vector<std::vector<std::vector<double> > > acc; // [unit][feature] -> window values
         for (const std::vector<std::string> &r : table.rows) {
@@ -150,19 +154,33 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
                 u = acc.size();
                 acc.push_back(std::vector<std::vector<double> >(features.size()));
                 unitCat.push_back(cat);
+                TrendUnit info;
+                info.id = field(r, cRec).empty() ? recordingId(r[size_t(cSrc)]) : field(r, cRec);
+                if (!opt.perRecording)
+                    info.id += " #" + field(r, cWin);
+                info.source = r[size_t(cSrc)];
+                info.note = field(r, cNote);
+                info.category = cat;
+                rep.unitList.push_back(info);
                 if (opt.perRecording)
                     unitOf[key] = u;
             }
+            ++rep.unitList[u].windows;
             for (size_t f = 0; f < features.size(); ++f) {
                 const int col = table.column(features[f]);
                 if (col >= 0 && size_t(col) < r.size())
                     acc[u][f].push_back(std::strtod(r[size_t(col)].c_str(), nullptr));
             }
         }
-        for (const std::vector<std::vector<double> > &u : acc) {
+        for (size_t u = 0; u < acc.size(); ++u) {
             std::vector<double> vals;
-            for (const std::vector<double> &v : u)
-                vals.push_back(summarize(v).mean);
+            for (const std::vector<double> &v : acc[u]) {
+                const Summary s = summarize(v);
+                vals.push_back(s.mean);
+                rep.unitList[u].windowCv.push_back(s.count >= 2 && std::fabs(s.mean) > 0 ? s.std / std::fabs(s.mean)
+                                                                                         : nan());
+            }
+            rep.unitList[u].value = vals;
             unitValues.push_back(vals);
         }
     }
@@ -213,6 +231,24 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
             ft.mean.push_back(m);
             ft.std.push_back(sampleStd(perCat[k], m));
             ft.count.push_back(int(perCat[k].size()));
+            ft.minValue.push_back(perCat[k].empty() ? nan() : *std::min_element(perCat[k].begin(), perCat[k].end()));
+            ft.maxValue.push_back(perCat[k].empty() ? nan() : *std::max_element(perCat[k].begin(), perCat[k].end()));
+        }
+        // units that fall inside the range of a neighbouring category (with data)
+        for (size_t k = 0; k < K; ++k) {
+            int n = 0;
+            for (double v : perCat[k]) {
+                bool inside = false;
+                for (int dk = -1; dk <= 1; dk += 2) {
+                    long j = long(k) + dk;
+                    while (j >= 0 && j < long(K) && ft.count[size_t(j)] == 0)
+                        j += dk; // skip empty categories
+                    if (j >= 0 && j < long(K) && v >= ft.minValue[size_t(j)] && v <= ft.maxValue[size_t(j)])
+                        inside = true;
+                }
+                n += inside ? 1 : 0;
+            }
+            ft.overlapping.push_back(n);
         }
 
         // monotonic category means

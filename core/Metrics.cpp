@@ -109,4 +109,41 @@ std::vector<std::string> featureNames()
     return names;
 }
 
+static const Metric *metricOf(const std::vector<std::unique_ptr<Metric> > &all, const std::string &feature)
+{
+    for (const std::unique_ptr<Metric> &m : all)
+        if (feature.compare(0, m->name().size() + 1, m->name() + "_") == 0)
+            return m.get();
+    return nullptr;
+}
+
+std::string featureLabel(const std::string &feature)
+{
+    if (feature == "scintillation_index")
+        return "Scintillation index";
+    const std::vector<std::unique_ptr<Metric> > all = createMetrics();
+    const Metric *m = metricOf(all, feature);
+    if (!m)
+        return feature;
+    const std::string stat = feature.substr(m->name().size() + 1);
+    const std::string statLabel = stat == "mean" ? "mean" : stat == "std" ? "variation (std)" : stat == "p95" ? "peaks (P95)" : stat;
+    return m->label() + " - " + statLabel;
+}
+
+std::string featureUnit(const std::string &feature)
+{
+    const std::vector<std::unique_ptr<Metric> > all = createMetrics();
+    const Metric *m = metricOf(all, feature);
+    return m ? m->unit() : std::string();
+}
+
+std::string featureMeaning(const std::string &feature)
+{
+    if (feature == "scintillation_index")
+        return "Normalized brightness flicker of the window (Var / Mean^2).";
+    const std::vector<std::unique_ptr<Metric> > all = createMetrics();
+    const Metric *m = metricOf(all, feature);
+    return m ? m->description() : std::string();
+}
+
 } // namespace turb

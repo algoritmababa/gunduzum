@@ -1,0 +1,69 @@
+#ifndef TRENDVIEW_H
+#define TRENDVIEW_H
+
+#include "TrendAnalysis.h"
+
+#include <QStringList>
+#include <QWidget>
+
+#include <functional>
+
+class QComboBox;
+class QDoubleSpinBox;
+class QLabel;
+class QLineEdit;
+class QListWidget;
+class QPushButton;
+class QStackedWidget;
+class QVBoxLayout;
+
+// Trend analysis page: runs TrendAnalysis on a results CSV when the user presses Analyze
+// and shows, per measurement, how it changes along the categories, whether the categories
+// are internally consistent and how stable every recording is.
+class TrendView : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit TrendView(QWidget *parent = nullptr);
+
+    void setCsvPath(const QString &path);
+    // Supplies the category order (e.g. LOW, MEDIUM, HIGH) at the moment of the analysis.
+    void setCategoryOrderProvider(const std::function<QStringList()> &provider) { m_orderProvider = provider; }
+
+signals:
+    void logMessage(const QString &message);
+
+private slots:
+    void browse();
+    void analyze();
+    void save();
+    void showFeature(int row);
+
+private:
+    QWidget *buildToolbar();
+    void rebuildSummary();
+    void rebuildList();
+    QWidget *buildListRow(const turb::FeatureTrend &t) const;
+    QWidget *buildDetail(const turb::FeatureTrend &t, size_t featureIndex) const;
+    QString categoryColor(size_t k) const;
+
+    std::function<QStringList()> m_orderProvider;
+    turb::TrendReport m_report;
+    bool m_perRecording = true;
+
+    QLineEdit *m_csv;
+    QComboBox *m_unit;
+    QDoubleSpinBox *m_alpha;
+    QPushButton *m_saveButton;
+    QLabel *m_summaryTitle;
+    QWidget *m_summaryChips;
+    QLabel *m_notes;
+    QWidget *m_summaryCard;
+    QStackedWidget *m_stack; // 0: empty state, 1: results
+    QListWidget *m_list;
+    QVBoxLayout *m_detailLayout;
+    QWidget *m_detail = nullptr;
+};
+
+#endif

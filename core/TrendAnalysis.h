@@ -38,10 +38,25 @@ enum class TrendVerdict {
 
 const char *verdictName(TrendVerdict v);
 
+// One analysis unit: a recording (its windows averaged) or a single window.
+struct TrendUnit {
+    std::string id;     // recording name (+ window number for window units)
+    std::string source; // path
+    std::string note;
+    int category = 0;   // index into TrendReport::categories
+    int windows = 0;    // windows averaged into this unit
+    std::vector<double> value;     // per feature (featureNames() order)
+    std::vector<double> windowCv;  // per feature: std / |mean| over the windows (NaN with < 2 windows)
+};
+
 struct FeatureTrend {
     std::string feature;
     std::vector<double> mean, std;
     std::vector<int> count;
+    std::vector<double> minValue, maxValue; // per category, over its units
+    // per category: how many of its units lie inside the value range of a neighbouring
+    // category (0 everywhere = the categories are internally consistent and do not mix)
+    std::vector<int> overlapping;
     double rho = 0.0;
     double pValue = 1.0;
     double pHolm = 1.0;
@@ -59,6 +74,7 @@ struct TrendReport {
     std::vector<int> unitsPerCategory;
     double minPossibleP = 1.0;           // smallest p-value this amount of data can give
     std::vector<FeatureTrend> features;
+    std::vector<TrendUnit> unitList;
     std::vector<std::string> notes;
 };
 
