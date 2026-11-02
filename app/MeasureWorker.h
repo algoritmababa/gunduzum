@@ -6,6 +6,7 @@
 #include <QImage>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <atomic>
 
@@ -20,6 +21,8 @@ public:
     MeasureWorker(const turb::Recording &rec, const turb::MeasureSettings &settings, const QString &resultsPath,
                   bool showFrames = false, bool showPreprocessed = false);
     void cancel() { m_cancel = true; }
+    // Earlier rows of these sources (same preprocessing) are removed before the new rows are added.
+    void setReplaceSources(const QStringList &sources) { m_replace = sources; }
 
 public slots:
     void run();
@@ -36,6 +39,7 @@ private:
     QString m_resultsPath;
     bool m_showFrames;
     bool m_showPreprocessed;
+    QStringList m_replace;
     std::atomic<bool> m_cancel;
 };
 

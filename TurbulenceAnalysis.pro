@@ -94,7 +94,8 @@ HEADERS += \
     app/TrendView.h \
     app/ImageUtils.h \
     app/FramePlayer.h \
-    app/RoiApplyDialog.h
+    app/RoiApplyDialog.h \
+    app/Datasets.h
 
 SOURCES += \
     app/main.cpp \
@@ -104,4 +105,5 @@ SOURCES += \
     app/TrendView.cpp \
     app/ImageUtils.cpp \
     app/FramePlayer.cpp \
-    app/RoiApplyDialog.cpp
+    app/RoiApplyDialog.cpp \
+    app/Datasets.cpp

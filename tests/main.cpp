@@ -551,6 +551,16 @@ int main(int argc, char **argv)
                   m2.rows[0][size_t(m2.column("category"))] == "1" && m2.rows[0][size_t(m2.column("note"))] == "a, b",
               "only the recording's rows changed");
         CHECK(relabelSource(mixed, ref, "HIGH", &err) == 0, "nothing to relabel");
+        // measuring again replaces the earlier rows of the same preprocessing only
+        CHECK(removeRows(mixed, std::vector<std::string>(1, ref + "/"), "none", &err) == 1, "remove rows " << err);
+        Table m3;
+        CHECK(loadTable(mixed, m3, &err) && m3.rows.size() == 2 &&
+                  m3.rows[1][size_t(m3.column("preprocess"))] == "clahe:clip=2,tiles=4" &&
+                  m3.rows[0][size_t(m3.column("note"))] == "a, b",
+              "other rows kept");
+        CHECK(removeRows(mixed, std::vector<std::string>(1, ref), "none", &err) == 0, "nothing left to remove");
+        CHECK(removeRows(work + "/does_not_exist.csv", std::vector<std::string>(1, ref), "none", &err) == 0,
+              "no file yet");
         Table both = t;
         for (const std::vector<std::string> &row : m.rows)
             both.rows.push_back(row);

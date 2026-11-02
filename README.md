@@ -37,7 +37,8 @@ isteğe bağlı **CLAHE** var (aşağıda).
 
 ## Kullanım
 
-1. **Recording**: görüntü klasörü veya video aç.
+1. **Dataset**: **Dataset folder…** ile tüm veri setlerinin bulunduğu klasörü seçin (aşağıda) ya da
+   tek bir görüntü klasörü veya video açın.
 2. **Label**: kategori (LOW / MEDIUM / HIGH veya yeni bir ad; boş = etiketsiz) ve not
    (saat, hava, pozlama…). **Her veri seti bir kez etiketlenir.** Etiket ve not o veri setiyle
    birlikte kaydedilir ve veri seti her açıldığında otomatik gelir. Önceden ölçülmüş veri setlerinin
@@ -51,6 +52,30 @@ isteğe bağlı **CLAHE** var (aşağıda).
 
 Sekmeler: **Image / ROI** (görüntü, ROI ve oynatıcı), **Results** (sonuç dosyasının içeriği),
 **Trend analysis** (aşağıda), **Log**.
+
+### Veri seti klasörü ve RUN ALL
+
+**Dataset folder…** ile seçilen klasördeki tüm veri setleri bir listede görünür. Veri seti
+sayılanlar: görüntü içeren alt klasörler, video dosyaları ve bir alt seviyedekiler
+(`klasör/LOW/kayit1` gibi). Klasör hatırlanır; liste her açılışta gelir. Listede bir satıra
+tıklamak o veri setini açar.
+
+* **Liste sütunları:** etiket, ROI ve ölçülmüş mü. *Measured* sütunu, seçili ön işlemeyle sonuç
+  dosyasındaki satır sayısını gösterir.
+* **Etiketler korunur, hiçbiri silinmez.** Daha önce etiketlenmiş bir veri seti klasöre taşınır
+  ya da kopyalanırsa etiketi, notu ve ROI'si adı üzerinden bulunur ve devralınır. Kaynaklar:
+  kayıtlı etiketler ve sonuç dosyası.
+* **Etiketsiz veri setleri** turuncu ⚠ ile işaretlenir. Aynı ada iki farklı etiket verilmişse
+  *conflict* yazar ve otomatik etiket verilmez. Bu veri setleri için **RUN** da **RUN ALL** da
+  engellenir; her birini bir kez açıp kategorisini seçin.
+* **RUN ALL:** klasördeki tüm veri setlerini, her birinin kendi etiketi ve ROI'si ile sırayla ölçer.
+  Pencere uzunluğu ve ön işleme ayarı hepsi için ortaktır. *"skip datasets already measured"*
+  seçiliyse, aynı ön işlemeyle zaten ölçülmüş olanlar atlanır. **Cancel** çalışan ölçümü durdurur
+  ve sıradakiler başlatılmaz.
+* **Yeniden ölçüm:** *"Measuring a dataset again replaces its earlier rows"* seçiliyse (varsayılan),
+  aynı ön işlemeyle yeniden ölçülen bir veri setinin eski satırları silinip yenileri yazılır.
+  Böylece eski ve yeni ROI'nin sonuçları aynı kayıtta karışmaz. Bu, veri setinin eski konumundaki
+  (aynı ad ve aynı etiket) satırlarını da kapsar. Diğer ön işleme varyantlarının satırları korunur.
 
 ### ROI'yi diğer veri setlerine uygulama (isteğe bağlı)
 

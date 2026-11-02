@@ -52,6 +52,17 @@ void MeasureWorker::run()
         return;
     }
     std::string err;
+    int replaced = 0;
+    if (!m_replace.isEmpty()) {
+        std::vector<std::string> sources;
+        for (const QString &s : m_replace)
+            sources.push_back(s.toStdString());
+        replaced = turb::removeRows(m_resultsPath.toStdString(), sources, out.preprocess, &err);
+        if (replaced < 0) {
+            emit done(false, QString::fromStdString(err));
+            return;
+        }
+    }
     if (!turb::appendResults(m_resultsPath.toStdString(), m_rec, out, &err)) {
         emit done(false, QString::fromStdString(err));
         return;
@@ -63,5 +74,6 @@ void MeasureWorker::run()
                         .arg(QString::fromStdString(out.recordingId))
                         .arg(out.windows.size())
                         .arg(frames)
-                        .arg(timer.elapsed() / 1000.0, 0, 'f', 1));
+                        .arg(timer.elapsed() / 1000.0, 0, 'f', 1) +
+                (replaced > 0 ? tr(" (replaced %1 earlier row(s))").arg(replaced) : QString()));
 }

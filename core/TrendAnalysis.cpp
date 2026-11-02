@@ -9,6 +9,7 @@
 #include <fstream>
 #include <locale>
 #include <map>
+#include <set>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -197,6 +198,24 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
             os << ignored << " labeled row(s) with a category outside the order were ignored.";
             rep.notes.push_back(os.str());
         }
+    }
+    {
+        // the same recording measured at two places (e.g. after moving the datasets) counts twice
+        const int cRec = table.column("recording");
+        std::map<std::string, std::set<std::string> > sources;
+        if (cRec >= 0)
+            for (const std::vector<std::string> &r : table.rows)
+                if (size_t(std::max(cRec, cSrc)) < r.size() && size_t(cCat) < r.size() && !r[size_t(cCat)].empty())
+                    sources[r[size_t(cRec)]].insert(r[size_t(cSrc)]);
+        std::string twice;
+        int n = 0;
+        for (const auto &kv : sources)
+            if (kv.second.size() > 1 && n++ < 5)
+                twice += (twice.empty() ? "" : ", ") + kv.first;
+        if (n > 0)
+            rep.notes.push_back(std::to_string(n) + " recording name(s) appear with more than one source path (" +
+                                twice + (n > 5 ? ", ..." : "") +
+                                "): if they are the same dataset at another place, it is counted more than once.");
     }
     if (preprocessVariants(table).size() > 1)
         rep.notes.push_back("The table mixes measurements with different preprocessing; analyze one "

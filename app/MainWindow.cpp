@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "Datasets.h"
 #include "FramePlayer.h"
 #include "FrameSource.h"
 #include "ImageUtils.h"
@@ -30,12 +31,15 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QThread>
+#include <QTimer>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 
 #include <cmath>
@@ -69,8 +73,39 @@ MainWindow::MainWindow(QWidget *parent)
     QVBoxLayout *iv = new QVBoxLayout(m_inputs);
     iv->setContentsMargins(0, 0, 0, 0);
 
-    QGroupBox *recBox = new QGroupBox(tr("1. Recording"));
+    QGroupBox *recBox = new QGroupBox(tr("1. Dataset"));
     QVBoxLayout *rv = new QVBoxLayout(recBox);
+    QHBoxLayout *folderRow = new QHBoxLayout;
+    QPushButton *bDatasets = new QPushButton(tr("Dataset folder..."));
+    bDatasets->setToolTip(tr("Folder that holds all datasets (image subfolders and videos, also one level deeper, "
+                             "e.g. folder/LOW/rec1). Labels and ROIs given before are remembered."));
+    connect(bDatasets, &QPushButton::clicked, this, &MainWindow::chooseDatasetFolder);
+    m_folderLabel = new QLabel(tr("no dataset folder"));
+    m_folderLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_folderLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred); // long paths must not widen the panel
+    folderRow->addWidget(bDatasets);
+    folderRow->addWidget(m_folderLabel, 1);
+    QPushButton *bRescan = new QPushButton(tr("Rescan"));
+    bRescan->setToolTip(tr("Read the dataset folder again (new datasets, labels, measurements)."));
+    connect(bRescan, &QPushButton::clicked, this, &MainWindow::refreshDatasets);
+    folderRow->addWidget(bRescan);
+    rv->addLayout(folderRow);
+    m_datasets = new QTreeWidget;
+    m_datasets->setRootIsDecorated(false);
+    m_datasets->setAlternatingRowColors(true);
+    m_datasets->setHeaderLabels(QStringList() << tr("Dataset") << tr("Label") << tr("ROI") << tr("Measured"));
+    m_datasets->setMinimumHeight(170);
+    m_datasets->header()->setStretchLastSection(false);
+    m_datasets->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int c = 1; c < 4; ++c)
+        m_datasets->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
+    m_datasets->setToolTip(tr("Click a dataset to open it. Unlabeled datasets (orange) cannot be measured."));
+    connect(m_datasets, &QTreeWidget::itemClicked, this, &MainWindow::onDatasetClicked);
+    rv->addWidget(m_datasets);
+    m_datasetSummary = new QLabel;
+    m_datasetSummary->setWordWrap(true);
+    m_datasetSummary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    rv->addWidget(m_datasetSummary);
     QHBoxLayout *pathRow = new QHBoxLayout;
     m_pathEdit = new QLineEdit;
     m_pathEdit->setPlaceholderText(tr("Image folder or video file"));
@@ -184,6 +219,15 @@ MainWindow::MainWindow(QWidget *parent)
     resRow->addWidget(m_resultsEdit, 1);
     resRow->addWidget(bRes);
     of->addRow(tr("Results file"), resRow);
+    m_replaceRows = new QCheckBox(tr("Measuring a dataset again replaces its earlier rows"));
+    m_replaceRows->setToolTip(tr("Earlier rows of the dataset with the same preprocessing are removed from the "
+                                 "results file, so a new ROI or window length does not mix with the old one. "
+                                 "Rows of other preprocessing variants are kept."));
+    m_replaceRows->setChecked(s.value("replaceRows", true).toBool());
+    of->addRow(m_replaceRows);
+    m_skipMeasured = new QCheckBox(tr("RUN ALL: skip datasets already measured with this preprocessing"));
+    m_skipMeasured->setChecked(s.value("skipMeasured", true).toBool());
+    of->addRow(m_skipMeasured);
     m_frameCsv = new QCheckBox(tr("Also save per-frame values"));
     of->addRow(m_frameCsv);
     m_showFrames = new QCheckBox(tr("Show frames while measuring"));
@@ -206,7 +250,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     QWidget *left = new QWidget;
     QVBoxLayout *lv = new QVBoxLayout(left);
-    lv->addWidget(m_inputs, 1);
+    QScrollArea *inputScroll = new QScrollArea;
+    inputScroll->setWidget(m_inputs);
+    inputScroll->setWidgetResizable(true);
+    inputScroll->setFrameShape(QFrame::NoFrame);
+    inputScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    inputScroll->setMinimumWidth(m_inputs->minimumSizeHint().width() + 20);
+    lv->addWidget(inputScroll, 1);
     QHBoxLayout *runRow = new QHBoxLayout;
     m_runButton = new QPushButton(tr("RUN"));
     m_runButton->setMinimumHeight(34);
@@ -214,7 +264,14 @@ MainWindow::MainWindow(QWidget *parent)
     m_cancelButton->setEnabled(false);
     connect(m_runButton, &QPushButton::clicked, this, &MainWindow::run);
     connect(m_cancelButton, &QPushButton::clicked, this, &MainWindow::cancel);
+    m_runAllButton = new QPushButton(tr("RUN ALL"));
+    m_runAllButton->setMinimumHeight(34);
+    m_runAllButton->setToolTip(tr("Measure every dataset of the dataset folder with its own label and ROI. "
+                                  "Blocked while a dataset is unlabeled."));
+    m_runAllButton->setEnabled(false);
+    connect(m_runAllButton, &QPushButton::clicked, this, &MainWindow::runAll);
     runRow->addWidget(m_runButton, 1);
+    runRow->addWidget(m_runAllButton, 1);
     runRow->addWidget(m_cancelButton);
     lv->addLayout(runRow);
     m_progress = new QProgressBar;
@@ -257,12 +314,16 @@ MainWindow::MainWindow(QWidget *parent)
     split->addWidget(left);
     split->addWidget(m_tabs);
     split->setStretchFactor(1, 1);
-    split->setSizes(QList<int>() << 430 << 870);
+    split->setSizes(QList<int>() << 480 << 820);
     setCentralWidget(split);
 
     updateRoiLabel();
     preprocessChanged();
     reloadResults();
+    m_datasetFolder = s.value("datasetFolder").toString();
+    if (!m_datasetFolder.isEmpty() && !QFileInfo(m_datasetFolder).isDir())
+        m_datasetFolder.clear();
+    refreshDatasets();
     log(tr("OpenCV %1").arg(CV_VERSION));
 }
 
@@ -285,6 +346,8 @@ void MainWindow::closeEvent(QCloseEvent *e)
     s.setValue("claheClip", m_clipLimit->value());
     s.setValue("claheTiles", m_tiles->value());
     s.setValue("claheShow", m_previewPre->isChecked());
+    s.setValue("skipMeasured", m_skipMeasured->isChecked());
+    s.setValue("replaceRows", m_replaceRows->isChecked());
     if (m_thread && m_thread->isRunning()) {
         m_worker->cancel();
         m_thread->quit();
@@ -323,7 +386,7 @@ void MainWindow::browseVideo()
     openRecording(f);
 }
 
-bool MainWindow::openRecording(const QString &path)
+bool MainWindow::openRecording(const QString &path, bool quiet)
 {
     if (path.isEmpty())
         return false;
@@ -331,8 +394,11 @@ bool MainWindow::openRecording(const QString &path)
     std::unique_ptr<turb::FrameSource> src = turb::FrameSource::create(path.toStdString(), &err);
     cv::Mat first;
     if (!src || !src->readAt(0, first)) {
-        QMessageBox::warning(this, tr("Recording"), err.empty() ? tr("Cannot read the first frame.")
-                                                                : QString::fromStdString(err));
+        const QString msg = err.empty() ? tr("Cannot read the first frame.") : QString::fromStdString(err);
+        if (quiet)
+            log(tr("Cannot open %1: %2").arg(path, msg));
+        else
+            QMessageBox::warning(this, tr("Recording"), msg);
         return false;
     }
     commitLabel(); // an unfinished edit of the previous dataset's label
@@ -343,11 +409,15 @@ bool MainWindow::openRecording(const QString &path)
     m_player->setSource(m_path);
     m_applyRoi->setEnabled(true);
     rememberRecording(m_path);
+    loadLabel(); // may take over the label and ROI of the same dataset at its old place
     // the ROI drawn last time for this recording (or applied from another one) is remembered
     m_roi = QSettings().value("roi/" + m_path).toRect();
     m_view->setRoi(m_roi);
     updateRoiLabel();
-    loadLabel();
+    // highlight it in the dataset list
+    for (int i = 0; i < m_datasets->topLevelItemCount(); ++i)
+        if (m_datasets->topLevelItem(i)->data(0, Qt::UserRole).toString() == m_path)
+            m_datasets->setCurrentItem(m_datasets->topLevelItem(i));
     m_tabs->setCurrentIndex(0);
     log(tr("Opened %1 (%2)").arg(path, QString::fromStdString(src->description())));
     return true;
@@ -372,40 +442,41 @@ void MainWindow::setFullFrame()
     m_player->refresh();
 }
 
+turb::Table MainWindow::loadResults() const
+{
+    turb::Table table;
+    const QString results = m_resultsEdit->text().trimmed();
+    if (QFileInfo::exists(results))
+        turb::loadTable(results.toStdString(), table, nullptr);
+    return table;
+}
+
 void MainWindow::loadLabel()
 {
     m_loadingLabel = true;
-    QSettings s;
-    QString category, note;
-    bool fromResults = false;
-    if (s.contains("category/" + m_path)) {
-        category = s.value("category/" + m_path).toString();
-        note = s.value("note/" + m_path).toString();
-    } else {
-        // measured before labels were saved per dataset: take the label of its rows in the results file
-        turb::Table table;
-        bool found = false;
-        if (QFileInfo::exists(m_resultsEdit->text().trimmed()) &&
-            turb::loadTable(m_resultsEdit->text().trimmed().toStdString(), table, nullptr))
-            category = QString::fromStdString(turb::lastValue(table, m_path.toStdString(), "category", &found));
-        if (found) {
-            note = QString::fromStdString(turb::lastValue(table, m_path.toStdString(), "note"));
-            s.setValue("category/" + m_path, category);
-            s.setValue("note/" + m_path, note);
-            fromResults = true;
-        }
-    }
-    if (category.isEmpty()) {
+    const datasets::Label l = datasets::lookup(m_path, loadResults());
+    if (l.category.isEmpty()) {
         m_category->setCurrentIndex(-1);
         m_category->setEditText(QString());
     } else {
-        if (m_category->findText(category) < 0)
-            m_category->addItem(category);
-        m_category->setCurrentIndex(m_category->findText(category));
+        if (m_category->findText(l.category) < 0)
+            m_category->addItem(l.category);
+        m_category->setCurrentIndex(m_category->findText(l.category));
     }
-    m_note->setText(note);
+    m_note->setText(l.note);
     m_loadingLabel = false;
-    updateLabelState(fromResults);
+    QString origin;
+    switch (l.origin) {
+    case datasets::Origin::Results: origin = tr("Label taken from the results file."); break;
+    case datasets::Origin::SameName: origin = tr("Label taken over from %1.").arg(l.from); break;
+    case datasets::Origin::Conflict:
+        origin = tr("Datasets with this name carry different labels - choose one.");
+        break;
+    default: break;
+    }
+    if (l.origin == datasets::Origin::SameName)
+        log(tr("%1: label '%2' taken over from %3").arg(QFileInfo(m_path).fileName(), l.category, l.from));
+    updateLabelState(origin);
 }
 
 void MainWindow::commitLabel()
@@ -423,6 +494,7 @@ void MainWindow::commitLabel()
     updateLabelState();
     if (!changed)
         return;
+    refreshDatasets();
 
     // rows measured with another label would put the dataset into two categories
     const QString results = m_resultsEdit->text().trimmed();
@@ -450,20 +522,22 @@ void MainWindow::commitLabel()
     reloadResults();
 }
 
-void MainWindow::updateLabelState(bool fromResults)
+void MainWindow::updateLabelState(const QString &origin)
 {
     if (m_path.isEmpty()) {
         m_labelState->clear();
         return;
     }
+    m_labelState->setWordWrap(true);
     if (m_category->currentText().trimmed().isEmpty())
         m_labelState->setText(QString::fromUtf8("<span style='color:#9a6700'>\xe2\x9a\xa0 ") +
-                              tr("Not labeled yet - choose a category once.") +
+                              (origin.isEmpty() ? tr("Not labeled yet - choose a category once (RUN is blocked "
+                                                     "until then).")
+                                                : origin.toHtmlEscaped()) +
                               "</span>");
     else
         m_labelState->setText(QString::fromUtf8("<span style='color:#1a7f37'>\xe2\x9c\x93 ") +
-                              (fromResults ? tr("Label taken from the results file.")
-                                           : tr("Label saved with this dataset.")) +
+                              (origin.isEmpty() ? tr("Label saved with this dataset.") : origin.toHtmlEscaped()) +
                               "</span>");
 }
 
@@ -498,6 +572,7 @@ void MainWindow::preprocessChanged()
         m_player->setFilter(std::function<void(cv::Mat &)>());
     }
     m_player->refresh();
+    refreshDatasets(); // "Measured" depends on the preprocessing
 }
 
 void MainWindow::updateRoiLabel()
@@ -599,6 +674,7 @@ void MainWindow::setRunning(bool running)
     m_player->setEnabled(!running && !m_path.isEmpty());
     m_inputs->setEnabled(!running);
     m_runButton->setEnabled(!running);
+    m_runAllButton->setEnabled(!running && m_datasets->topLevelItemCount() > 0);
     m_cancelButton->setEnabled(running);
 }
 
@@ -617,6 +693,15 @@ void MainWindow::run()
     }
 
     commitLabel();
+    if (m_category->currentText().trimmed().isEmpty()) {
+        // every measured dataset carries its category
+        if (!m_batch)
+            QMessageBox::warning(this, tr("Run"),
+                                 tr("%1 is not labeled.\n\nChoose its category in \"2. Label\" first - it is saved "
+                                    "with the dataset, so this is needed only once.")
+                                     .arg(QFileInfo(m_path).fileName()));
+        return;
+    }
     turb::Recording rec;
     rec.path = m_path.toStdString();
     rec.category = m_category->currentText().trimmed().toStdString();
@@ -643,6 +728,8 @@ void MainWindow::run()
 
     m_thread = new QThread(this);
     m_worker = new MeasureWorker(rec, settings, results, m_showFrames->isChecked(), m_previewPre->isChecked());
+    if (m_replaceRows->isChecked())
+        m_worker->setReplaceSources(datasets::replacedSources(m_path, m_category->currentText().trimmed(), loadResults()));
     m_worker->moveToThread(m_thread);
     connect(m_thread, &QThread::started, m_worker, &MeasureWorker::run);
     connect(m_worker, &MeasureWorker::progress, this, &MainWindow::onProgress);
@@ -665,6 +752,191 @@ void MainWindow::run()
     m_thread->start();
 }
 
+// ---------------------------------------------------------------------------------------
+// dataset folder
+
+void MainWindow::chooseDatasetFolder()
+{
+    QSettings s;
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Dataset folder"), m_datasetFolder.isEmpty() ? s.value("lastDir", QDir::homePath()).toString()
+                                                              : m_datasetFolder);
+    if (dir.isEmpty())
+        return;
+    m_datasetFolder = QDir::cleanPath(dir);
+    s.setValue("datasetFolder", m_datasetFolder);
+    refreshDatasets();
+    log(tr("Dataset folder %1: %2 dataset(s)").arg(m_datasetFolder).arg(m_datasets->topLevelItemCount()));
+}
+
+void MainWindow::refreshDatasets()
+{
+    m_datasets->clear();
+    if (m_datasetFolder.isEmpty()) {
+        m_folderLabel->setText(tr("no dataset folder - or open single datasets below"));
+        m_datasetSummary->clear();
+        m_datasets->hide();
+        m_runAllButton->setEnabled(false);
+        return;
+    }
+    m_datasets->show();
+    m_folderLabel->setText(QFileInfo(m_datasetFolder).fileName());
+    m_folderLabel->setToolTip(m_datasetFolder);
+    const turb::Table results = loadResults();
+    const QString variant = QString::fromStdString(preprocess().label());
+    const QStringList found = datasets::find(m_datasetFolder);
+    int unlabeled = 0, measured = 0;
+    const QString base = m_datasetFolder + "/";
+    for (const QString &p : found) {
+        const datasets::Label l = datasets::lookup(p, results);
+        const int rows = datasets::measuredRows(p, results, variant);
+        QTreeWidgetItem *it = new QTreeWidgetItem;
+        it->setText(0, p.startsWith(base) ? p.mid(base.size()) : QFileInfo(p).fileName());
+        it->setToolTip(0, p);
+        it->setData(0, Qt::UserRole, p);
+        if (l.labeled()) {
+            it->setText(1, l.category);
+            if (l.origin == datasets::Origin::SameName)
+                it->setToolTip(1, tr("taken over from %1").arg(l.from));
+        } else {
+            ++unlabeled;
+            it->setText(1, QString::fromUtf8("\xe2\x9a\xa0 ") +
+                               (l.origin == datasets::Origin::Conflict ? tr("conflict") : tr("unlabeled")));
+            it->setToolTip(1, l.origin == datasets::Origin::Conflict
+                                  ? tr("Datasets with this name carry different labels - open it and choose one.")
+                                  : tr("Open it and choose its category once."));
+            for (int c = 0; c < 4; ++c)
+                it->setForeground(c, QColor("#9a6700"));
+            it->setBackground(1, QColor("#fff8c5"));
+        }
+        it->setText(2, l.roi.isEmpty() ? tr("full") : QString("%1x%2").arg(l.roi.width()).arg(l.roi.height()));
+        it->setText(3, rows > 0 ? QString::fromUtf8("\xe2\x9c\x93 %1").arg(rows) : QString());
+        it->setToolTip(3, rows > 0 ? tr("%1 row(s) with preprocessing '%2' in the results file").arg(rows).arg(variant)
+                                   : tr("not measured with preprocessing '%1'").arg(variant));
+        measured += rows > 0;
+        m_datasets->addTopLevelItem(it);
+        if (p == m_path)
+            m_datasets->setCurrentItem(it);
+    }
+    if (found.isEmpty())
+        m_datasetSummary->setText(tr("No datasets found (image subfolders or video files)."));
+    else
+        m_datasetSummary->setText(
+            tr("%1 dataset(s), %2 measured").arg(found.size()).arg(measured) +
+            (unlabeled > 0 ? QString::fromUtf8(" - <span style='color:#9a6700'><b>\xe2\x9a\xa0 %1 unlabeled</b>: "
+                                               "open each once and choose its category</span>")
+                                 .arg(unlabeled)
+                           : QString::fromUtf8(" - <span style='color:#1a7f37'>\xe2\x9c\x93 all labeled</span>")));
+    m_runAllButton->setEnabled(!m_thread && !found.isEmpty());
+}
+
+void MainWindow::onDatasetClicked(QTreeWidgetItem *item)
+{
+    if (!item || m_thread)
+        return;
+    const QString p = item->data(0, Qt::UserRole).toString();
+    if (p != m_path)
+        openRecording(p);
+}
+
+void MainWindow::runAll()
+{
+    if (m_thread)
+        return;
+    if (m_resultsEdit->text().trimmed().isEmpty()) {
+        QMessageBox::information(this, tr("Run all"), tr("Choose a results file."));
+        return;
+    }
+    commitLabel();
+    refreshDatasets();
+    const turb::Table results = loadResults();
+    const QString variant = QString::fromStdString(preprocess().label());
+    QStringList todo, unlabeled;
+    int skipped = 0;
+    for (int i = 0; i < m_datasets->topLevelItemCount(); ++i) {
+        const QString p = m_datasets->topLevelItem(i)->data(0, Qt::UserRole).toString();
+        if (!datasets::lookup(p, results).labeled()) {
+            unlabeled << m_datasets->topLevelItem(i)->text(0);
+            continue;
+        }
+        if (m_skipMeasured->isChecked() && datasets::measuredRows(p, results, variant) > 0) {
+            ++skipped;
+            continue;
+        }
+        todo << p;
+    }
+    if (!unlabeled.isEmpty()) {
+        QMessageBox::warning(this, tr("Run all"),
+                             tr("%1 dataset(s) are not labeled:\n\n%2\n\nOpen each of them once (click it in the list) "
+                                "and choose its category. Nothing was measured.")
+                                 .arg(unlabeled.size())
+                                 .arg(unlabeled.mid(0, 15).join("\n") +
+                                      (unlabeled.size() > 15 ? "\n..." : "")));
+        return;
+    }
+    if (todo.isEmpty()) {
+        QMessageBox::information(this, tr("Run all"),
+                                 tr("All %1 dataset(s) are already measured with preprocessing '%2'.\n\n"
+                                    "Uncheck \"skip datasets already measured\" to measure them again.")
+                                     .arg(skipped)
+                                     .arg(variant));
+        return;
+    }
+    if (QMessageBox::question(this, tr("Run all"),
+                              tr("Measure %1 dataset(s) with preprocessing '%2'?%3")
+                                  .arg(todo.size())
+                                  .arg(variant)
+                                  .arg(skipped > 0 ? tr("\n(%1 already measured are skipped.)").arg(skipped)
+                                                   : QString())) != QMessageBox::Yes)
+        return;
+    m_queue = todo;
+    m_batch = true;
+    m_batchTotal = todo.size();
+    m_batchDone = 0;
+    m_batchFailed.clear();
+    log(tr("RUN ALL: %1 dataset(s), preprocessing %2").arg(todo.size()).arg(variant));
+    startNextInQueue();
+}
+
+void MainWindow::startNextInQueue()
+{
+    while (!m_queue.isEmpty()) {
+        const QString p = m_queue.takeFirst();
+        if (!openRecording(p, true)) {
+            m_batchFailed << QFileInfo(p).fileName() + tr(": cannot be opened");
+            ++m_batchDone;
+            continue;
+        }
+        run();
+        if (m_thread)
+            return; // onDone continues with the next one
+        m_batchFailed << QFileInfo(p).fileName() + tr(": not started");
+        ++m_batchDone;
+    }
+    finishQueue(QString());
+}
+
+void MainWindow::finishQueue(const QString &why)
+{
+    const int left = m_queue.size();
+    m_queue.clear();
+    m_batch = false;
+    refreshDatasets();
+    QString text = tr("RUN ALL %1: %2 of %3 dataset(s) done")
+                       .arg(why.isEmpty() ? tr("finished") : why)
+                       .arg(m_batchDone - m_batchFailed.size())
+                       .arg(m_batchTotal);
+    if (left > 0)
+        text += tr(", %1 not started").arg(left);
+    if (!m_batchFailed.isEmpty())
+        text += tr(", %1 failed:\n%2").arg(m_batchFailed.size()).arg(m_batchFailed.join("\n"));
+    m_status->setText(text.section('\n', 0, 0));
+    log(text);
+    m_tabs->setCurrentIndex(1);
+    if (!m_batchFailed.isEmpty())
+        QMessageBox::warning(this, tr("Run all"), text);
+}
+
 void MainWindow::cancel()
 {
     if (m_worker)
@@ -674,7 +946,12 @@ void MainWindow::cancel()
 void MainWindow::onProgress(int done, int total)
 {
     m_progress->setValue(total > 0 ? int(100LL * done / total) : 0);
-    m_status->setText(tr("frame %1 / %2").arg(done).arg(total));
+    const QString frames = tr("frame %1 / %2").arg(done).arg(total);
+    m_status->setText(m_batch ? tr("dataset %1 / %2 (%3): %4")
+                                    .arg(m_batchDone + 1)
+                                    .arg(m_batchTotal)
+                                    .arg(QFileInfo(m_path).fileName(), frames)
+                              : frames);
 }
 
 void MainWindow::onDone(bool ok, const QString &message)
@@ -684,6 +961,19 @@ void MainWindow::onDone(bool ok, const QString &message)
     setRunning(false);
     m_status->setText(message);
     log(message);
+    if (m_batch) {
+        reloadResults();
+        if (!ok && message.startsWith("Cancel")) {
+            finishQueue(tr("cancelled"));
+            return;
+        }
+        if (!ok)
+            m_batchFailed << QFileInfo(m_path).fileName() + ": " + message;
+        refreshDatasets();
+        ++m_batchDone;
+        QTimer::singleShot(0, this, &MainWindow::startNextInQueue);
+        return;
+    }
     if (!ok) {
         if (!message.startsWith("Cancel"))
             QMessageBox::warning(this, tr("Measurement"), message);
@@ -723,4 +1013,6 @@ void MainWindow::reloadResults()
             m_results->setItem(r, c, cell(text));
         }
     m_results->resizeColumnsToContents();
+    if (!m_batch)
+        refreshDatasets(); // the "Measured" column follows the results file
 }

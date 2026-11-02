@@ -1,7 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include "Measurement.h"
+#include "ResultTable.h"
 
 #include <QMainWindow>
 
@@ -21,6 +21,8 @@ class QSpinBox;
 class QTableWidget;
 class QTabWidget;
 class QThread;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 // Measurement tool: open a recording, draw the ROI, give it a category, RUN.
 // Every run appends one row per window to the shared results CSV.
@@ -48,9 +50,16 @@ private slots:
     void reloadResults();
     void applyRoiToOthers();
     void showFrame(const QImage &image, int frameIndex);
+    void chooseDatasetFolder();
+    void refreshDatasets();
+    void onDatasetClicked(QTreeWidgetItem *item);
+    void runAll();
 
 private:
-    bool openRecording(const QString &path);
+    bool openRecording(const QString &path, bool quiet = false);
+    void startNextInQueue();
+    void finishQueue(const QString &why);
+    turb::Table loadResults() const;
     void updateRoiLabel();
     void setRunning(bool running);
     void log(const QString &msg);
@@ -61,10 +70,14 @@ private:
     // Labels are stored per dataset (once): loaded when it is opened, saved when changed.
     void loadLabel();
     void commitLabel();
-    void updateLabelState(bool fromResults = false);
+    void updateLabelState(const QString &origin = QString());
     void preprocessChanged();
 
     // inputs
+    QLabel *m_folderLabel;
+    QTreeWidget *m_datasets;   // datasets of the dataset folder
+    QLabel *m_datasetSummary;
+    QString m_datasetFolder;
     QLineEdit *m_pathEdit;
     QLabel *m_info;
     QComboBox *m_category;
@@ -82,7 +95,14 @@ private:
     QCheckBox *m_previewPre;
     QPushButton *m_applyRoi;
     QWidget *m_inputs;
-    QPushButton *m_runButton, *m_cancelButton;
+    QPushButton *m_runButton, *m_runAllButton, *m_cancelButton;
+    QCheckBox *m_skipMeasured;
+    QCheckBox *m_replaceRows;
+    // RUN ALL: datasets still to measure, counters of the batch
+    QStringList m_queue;
+    bool m_batch = false;
+    int m_batchTotal = 0, m_batchDone = 0;
+    QStringList m_batchFailed;
     QProgressBar *m_progress;
     QLabel *m_status;
     // outputs

@@ -41,6 +41,12 @@ int countRowsToRelabel(const Table &table, const std::string &source, const std:
 int relabelSource(const std::string &csvPath, const std::string &source, const std::string &category,
                   std::string *error);
 
+// Removes the rows of the given recordings (source paths) measured with one preprocessing
+// variant, so that measuring a dataset again (e.g. with another ROI) replaces its earlier rows
+// instead of mixing both. Returns the number of removed rows, -1 on error.
+int removeRows(const std::string &csvPath, const std::vector<std::string> &sources, const std::string &preprocess,
+               std::string *error);
+
 // Preprocessing variants in a table, in order of appearance ("none" for a table without the column).
 std::vector<std::string> preprocessVariants(const Table &table);
 // The rows measured with one preprocessing variant (a table without the column counts as "none").

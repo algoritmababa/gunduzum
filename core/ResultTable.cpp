@@ -285,6 +285,63 @@ bool loadTable(const std::string &csvPath, Table &table, std::string *error)
     return true;
 }
 
+int removeRows(const std::string &csvPath, const std::vector<std::string> &sources, const std::string &preprocess,
+               std::string *error)
+{
+    Table t;
+    {
+        std::ifstream probe(csvPath.c_str());
+        if (!probe)
+            return 0; // no file yet
+    }
+    if (!loadTable(csvPath, t, error))
+        return -1;
+    const int cSrc = t.column("source"), cPre = t.column("preprocess");
+    if (cSrc < 0)
+        return 0;
+    std::vector<std::string> wanted;
+    for (const std::string &s : sources)
+        wanted.push_back(trimSlashes(s));
+    auto hit = [&](const std::vector<std::string> &r) {
+        if (size_t(cSrc) >= r.size())
+            return false;
+        const std::string v = cPre >= 0 && size_t(cPre) < r.size() && !r[size_t(cPre)].empty() ? r[size_t(cPre)]
+                                                                                              : std::string("none");
+        return v == preprocess &&
+               std::find(wanted.begin(), wanted.end(), trimSlashes(r[size_t(cSrc)])) != wanted.end();
+    };
+    int n = 0;
+    for (const std::vector<std::string> &r : t.rows)
+        n += hit(r);
+    if (n == 0)
+        return 0;
+    // rewrite without those rows
+    const std::string tmp = csvPath + ".rewrite.tmp";
+    {
+        std::ofstream o(tmp.c_str(), std::ios::out | std::ios::trunc);
+        auto line = [&](const std::vector<std::string> &f) {
+            for (size_t i = 0; i < f.size(); ++i)
+                o << (i ? "," : "") << csvEscape(f[i]);
+            o << "\n";
+        };
+        line(t.header);
+        for (const std::vector<std::string> &r : t.rows)
+            if (!hit(r))
+                line(r);
+        o.flush();
+        if (!o) {
+            if (error) *error = "Cannot write " + tmp;
+            return -1;
+        }
+    }
+    std::remove(csvPath.c_str());
+    if (std::rename(tmp.c_str(), csvPath.c_str()) != 0) {
+        if (error) *error = "Cannot replace " + csvPath + " (the new copy is " + tmp + ")";
+        return -1;
+    }
+    return n;
+}
+
 std::vector<std::string> preprocessVariants(const Table &table)
 {
     std::vector<std::string> v;
