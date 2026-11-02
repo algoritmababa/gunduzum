@@ -11,7 +11,9 @@
 #include <opencv2/imgproc/imgproc.hpp>
 
 #include <algorithm>
+#include <clocale>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -556,6 +558,49 @@ int main(int argc, char **argv)
         for (const std::string &n : analyzeTrends(both, TrendOptions()).notes)
             warned = warned || n.find("different preprocessing") != std::string::npos;
         CHECK(warned, "mixed preprocessing is reported");
+    }
+
+    // --- numbers do not depend on the system language -------------------------------------
+    // The GUI runs with the user's locale (Qt calls setlocale): in Turkish / German the decimal
+    // separator is ',' and strtod("0.0123") gives 0. Reading and writing must not care.
+    {
+        const TrendReport before = analyzeTrends(t, TrendOptions());
+        const char *commaLocales[] = {"tr_TR.UTF-8", "tr_TR.utf8", "de_DE.UTF-8", "de_DE.utf8", "tr_TR", "de_DE"};
+        const char *used = nullptr;
+        for (const char *l : commaLocales)
+            if (std::setlocale(LC_ALL, l) && std::strtod("0.5", nullptr) == 0.0) {
+                used = l;
+                break;
+            }
+        if (!used) {
+            std::setlocale(LC_ALL, "C");
+            std::cout << "locale: no comma-decimal locale installed, check skipped\n";
+        } else {
+            std::cout << "locale: checked with " << used << "\n";
+            CHECK_NEAR(parseNumber("0.0123"), 0.0123, 1e-15, "parse with comma locale");
+            CHECK(formatNumber(0.5) == "0.5", "format with comma locale " << formatNumber(0.5));
+            const TrendReport after = analyzeTrends(t, TrendOptions());
+            bool same = after.ok && after.features.size() == before.features.size();
+            for (size_t f = 0; same && f < after.features.size(); ++f)
+                for (size_t k = 0; k < after.features[f].mean.size(); ++k)
+                    same = same && after.features[f].mean[k] == before.features[f].mean[k];
+            CHECK(same, "trend analysis independent of the locale");
+            const std::string loc = work + "/locale.csv";
+            std::remove(loc.c_str());
+            Recording rec;
+            rec.path = motionDir;
+            MeasureSettings eq;
+            eq.preprocess.clahe = true;
+            eq.preprocess.clipLimit = 2.5;
+            const MeasureOutput out = measure(rec, eq, ProgressFn(), nullptr);
+            CHECK(out.preprocess == "clahe:clip=2.5,tiles=8", "label with comma locale " << out.preprocess);
+            CHECK(appendResults(loc, rec, out, &err), err);
+            Table lt;
+            loadTable(loc, lt, &err);
+            const std::string sh = lt.rows[0][size_t(lt.column("sharpness_mean"))];
+            CHECK(sh.find(',') == std::string::npos && parseNumber(sh) > 0, "written with '.' " << sh);
+            std::setlocale(LC_ALL, "C");
+        }
     }
 
     testScenarios(work);

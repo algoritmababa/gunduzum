@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <locale>
 #include <sstream>
 
 namespace turb {
@@ -24,6 +25,7 @@ std::string Preprocess::label() const
     if (!clahe)
         return "none";
     std::ostringstream os;
+    os.imbue(std::locale::classic());
     os << "clahe:clip=" << clipLimit << ",tiles=" << tileGrid;
     return os.str();
 }
@@ -119,6 +121,7 @@ MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, con
             for (const std::string &c : m->frameColumns())
                 frameCsv << "," << c;
         frameCsv << "\n";
+        frameCsv.imbue(std::locale::classic());
         frameCsv.precision(10);
     }
 

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <locale>
 #include <map>
 #include <numeric>
 #include <random>
@@ -248,7 +249,7 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
             for (size_t f = 0; f < features.size(); ++f) {
                 const int col = table.column(features[f]);
                 if (col >= 0 && size_t(col) < r.size())
-                    acc[u][f].push_back(std::strtod(r[size_t(col)].c_str(), nullptr));
+                    acc[u][f].push_back(parseNumber(r[size_t(col)]));
             }
         }
         for (size_t u = 0; u < acc.size(); ++u) {
@@ -460,6 +461,7 @@ static std::string num(double v)
     if (!std::isfinite(v))
         return "NaN";
     std::ostringstream os;
+    os.imbue(std::locale::classic());
     os.precision(8);
     os << v;
     return os.str();
@@ -468,6 +470,7 @@ static std::string num(double v)
 bool writeTrendCsv(const TrendReport &rep, const std::string &path, std::string *error)
 {
     std::ofstream f(path.c_str(), std::ios::out | std::ios::trunc);
+    f.imbue(std::locale::classic());
     if (!f) {
         if (error) *error = "Cannot write " + path;
         return false;

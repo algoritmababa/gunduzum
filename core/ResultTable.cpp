@@ -6,6 +6,8 @@
 #include <ctime>
 #include <fstream>
 #include <functional>
+#include <limits>
+#include <locale>
 #include <sstream>
 
 namespace turb {
@@ -69,14 +71,30 @@ std::vector<std::string> parseCsvLine(const std::string &line)
     return fields;
 }
 
-static std::string number(double v)
+double parseNumber(const std::string &s)
+{
+    std::istringstream is(s);
+    is.imbue(std::locale::classic());
+    double v = 0.0;
+    if (!(is >> v))
+        return std::numeric_limits<double>::quiet_NaN();
+    return v;
+}
+
+std::string formatNumber(double v)
 {
     if (!std::isfinite(v))
         return "NaN";
     std::ostringstream os;
+    os.imbue(std::locale::classic());
     os.precision(10);
     os << v;
     return os.str();
+}
+
+static std::string number(double v)
+{
+    return formatNumber(v);
 }
 
 // Rewrites a results file line by line: edit(fields, isHeader) may change every row.

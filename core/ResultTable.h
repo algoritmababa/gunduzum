@@ -47,6 +47,11 @@ std::vector<std::string> preprocessVariants(const Table &table);
 Table filterPreprocess(const Table &table, const std::string &variant);
 
 std::string csvEscape(const std::string &s);
+// Numbers in the table always use '.' as the decimal separator, whatever the system language
+// (strtod / atof follow the locale: with a Turkish or German locale "0.0123" would read as 0).
+// Returns NaN for "NaN", empty or unparsable fields.
+double parseNumber(const std::string &s);
+std::string formatNumber(double v);
 std::vector<std::string> parseCsvLine(const std::string &line);
 
 } // namespace turb

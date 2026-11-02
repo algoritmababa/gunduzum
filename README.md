@@ -160,6 +160,7 @@ intensity_mean, intensity_std, intensity_p95, scintillation_index
 Bir satır = bir kaydın bir penceresi. Tüm çalıştırmalar aynı dosyaya eklenir; analiz uygulamada
 (trend analizi) veya Excel / Python / MATLAB ile yapılabilir. Sütunları farklı bir dosyaya ekleme
 reddedilir (algoritmalar eklendiğinde sütunlar değiştiği için yeni bir sonuç dosyası başlatın).
+Sayılar sistem dilinden bağımsız olarak her zaman `.` ondalık ayracıyla yazılır ve okunur.
 İstisna: `preprocess` sütunu olmayan önceki sürüm dosyaları ilk eklemede otomatik yükseltilir; eski
 satırlar `none` olarak işaretlenir.
 
