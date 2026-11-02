@@ -244,6 +244,18 @@ int main(int argc, char **argv)
         CHECK(wo.ok && wo.windows.size() == 2, "two windows of 16 frames");
         CHECK(wo.windows[1].startFrame == 16 && wo.windows[1].endFrame == 31, "second window range");
 
+        // optional frame view: called once per measured frame with the raw frame, in order
+        {
+            std::vector<int> seen;
+            cv::Size frameSize;
+            const MeasureOutput fo = measure(rec, w16, ProgressFn(), nullptr, [&](int index, const cv::Mat &raw) {
+                seen.push_back(index);
+                frameSize = raw.size();
+            });
+            CHECK(fo.ok && seen.size() == 32 && seen.front() == 0 && seen.back() == 31, "frame view called per frame");
+            CHECK(frameSize == cv::Size(128, 128), "frame view gets the full raw frame");
+        }
+
         // cancellation
         std::atomic<bool> stop(true);
         const MeasureOutput c = measure(rec, MeasureSettings(), ProgressFn(), &stop);

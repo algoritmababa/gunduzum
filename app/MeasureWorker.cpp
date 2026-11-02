@@ -1,14 +1,16 @@
 #include "MeasureWorker.h"
 
+#include "ImageUtils.h"
 #include "ResultTable.h"
 
 #include <QElapsedTimer>
 
 MeasureWorker::MeasureWorker(const turb::Recording &rec, const turb::MeasureSettings &settings,
-                             const QString &resultsPath)
+                             const QString &resultsPath, bool showFrames)
     : m_rec(rec)
     , m_settings(settings)
     , m_resultsPath(resultsPath)
+    , m_showFrames(showFrames)
     , m_cancel(false)
 {
 }
@@ -17,7 +19,16 @@ void MeasureWorker::run()
 {
     QElapsedTimer timer;
     timer.start();
-    qint64 last = -1000;
+    qint64 last = -1000, lastFrame = -1000;
+    turb::FrameFn frameView;
+    if (m_showFrames)
+        frameView = [&](int index, const cv::Mat &raw) {
+            // converting every frame would slow the measurement down: ~15 frames per second
+            if (timer.elapsed() - lastFrame < 66)
+                return;
+            lastFrame = timer.elapsed();
+            emit frame(toQImage(raw), index);
+        };
     const turb::MeasureOutput out = turb::measure(
         m_rec, m_settings,
         [&](int doneFrames, int total) {
@@ -27,7 +38,7 @@ void MeasureWorker::run()
                 emit progress(doneFrames, total);
             }
         },
-        &m_cancel);
+        &m_cancel, frameView);
 
     if (!out.ok) {
         emit done(false, QString::fromStdString(out.error));

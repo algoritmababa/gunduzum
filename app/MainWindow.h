@@ -5,6 +5,7 @@
 
 #include <QMainWindow>
 
+class FramePlayer;
 class MeasureWorker;
 class RoiView;
 class TrendView;
@@ -44,12 +45,16 @@ private slots:
     void onProgress(int done, int total);
     void onDone(bool ok, const QString &message);
     void reloadResults();
+    void applyRoiToOthers();
+    void showFrame(const QImage &image, int frameIndex);
 
 private:
     bool openRecording(const QString &path);
     void updateRoiLabel();
     void setRunning(bool running);
     void log(const QString &msg);
+    void rememberRecording(const QString &path);
+    QStringList knownRecordings() const;
     QStringList categoryOrder() const;
 
     // inputs
@@ -61,6 +66,8 @@ private:
     QSpinBox *m_window;
     QLineEdit *m_resultsEdit;
     QCheckBox *m_frameCsv;
+    QCheckBox *m_showFrames;
+    QPushButton *m_applyRoi;
     QWidget *m_inputs;
     QPushButton *m_runButton, *m_cancelButton;
     QProgressBar *m_progress;
@@ -68,6 +75,7 @@ private:
     // outputs
     QTabWidget *m_tabs;
     RoiView *m_view;
+    FramePlayer *m_player;
     QTableWidget *m_results;
     TrendView *m_trendView;
     QPlainTextEdit *m_log;

@@ -3,6 +3,7 @@
 
 #include "Measurement.h"
 
+#include <QImage>
 #include <QObject>
 #include <QString>
 
@@ -14,7 +15,9 @@ class MeasureWorker : public QObject
     Q_OBJECT
 
 public:
-    MeasureWorker(const turb::Recording &rec, const turb::MeasureSettings &settings, const QString &resultsPath);
+    // showFrames: send the frames being measured to the GUI (throttled to ~15 per second)
+    MeasureWorker(const turb::Recording &rec, const turb::MeasureSettings &settings, const QString &resultsPath,
+                  bool showFrames = false);
     void cancel() { m_cancel = true; }
 
 public slots:
@@ -22,6 +25,7 @@ public slots:
 
 signals:
     void progress(int framesDone, int framesTotal);
+    void frame(const QImage &image, int frameIndex);
     // ok = rows were appended; message describes the result or the error
     void done(bool ok, const QString &message);
 
@@ -29,6 +33,7 @@ private:
     turb::Recording m_rec;
     turb::MeasureSettings m_settings;
     QString m_resultsPath;
+    bool m_showFrames;
     std::atomic<bool> m_cancel;
 };
 

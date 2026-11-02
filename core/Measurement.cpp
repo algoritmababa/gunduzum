@@ -40,7 +40,7 @@ std::string recordingId(const std::string &path)
 }
 
 MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, const ProgressFn &progress,
-                      const std::atomic<bool> *cancel)
+                      const std::atomic<bool> *cancel, const FrameFn &frameView)
 {
     MeasureOutput out;
     out.recordingId = recordingId(rec.path);
@@ -106,6 +106,8 @@ MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, con
                         return out;
                     }
                 }
+                if (frameView)
+                    frameView(f, raw);
                 toGray32f(raw, out.roi, gray);
                 if (frameCsv.is_open())
                     frameCsv << w << "," << f;

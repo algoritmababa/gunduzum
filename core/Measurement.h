@@ -50,12 +50,14 @@ struct MeasureOutput {
 };
 
 typedef std::function<void(int framesDone, int framesTotal)> ProgressFn;
+// Optional view of every frame as it is measured (raw decoded frame, valid only during the call).
+typedef std::function<void(int frameIndex, const cv::Mat &raw)> FrameFn;
 
 // Reads the recording frame by frame (only the current frame is in memory),
 // crops the ROI, converts to gray float and feeds every metric.
 // Windows have exactly windowLength frames; a remainder shorter than that is dropped.
 MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, const ProgressFn &progress,
-                      const std::atomic<bool> *cancel);
+                      const std::atomic<bool> *cancel, const FrameFn &frameView = FrameFn());
 
 cv::Rect effectiveRoi(const Roi &roi, const cv::Size &frameSize);
 // raw frame -> ROI crop -> grayscale -> CV_32F (no other preprocessing)

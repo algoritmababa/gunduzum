@@ -42,7 +42,28 @@ oranlandığı için global ışık ya da pozlama değişimi bu ölçümleri etk
 4. **Measurement**: pencere uzunluğu (0 = tüm kayıt tek pencere) ve sonuç dosyası.
 5. **RUN** → her pencere sonuç dosyasına bir satır olarak **eklenir**.
 
-Sekmeler: **Results** (sonuç dosyasının içeriği), **Trend analysis** (aşağıda), **Log**.
+Sekmeler: **Image / ROI** (görüntü, ROI ve oynatıcı), **Results** (sonuç dosyasının içeriği),
+**Trend analysis** (aşağıda), **Log**.
+
+### ROI'yi diğer veri setlerine uygulama (isteğe bağlı)
+
+**Apply this ROI to other datasets…** düğmesi, bir veri setinde çizilen ROI'yi diğerlerine aktarır.
+
+* **Aday listesi:** sonuç dosyasındaki kayıtlar ve son açılanlar otomatik gelir. Klasör, video ya da
+  bir üst klasördeki tüm alt klasörler (*Add all subfolders of…*) eklenebilir.
+* **Önizleme:** onaydan önce her veri setinin **ilk karesi**, üzerinde ROI çizili olarak gösterilir.
+  Her önizlemenin altında bir durum yazar: ✓ *ROI fits*, ⚠ *partly outside, clamped* (görüntü küçük, ROI
+  kırpılarak kullanılacak) ya da ✕ *outside the image* (seçilemez, atlanır).
+* **Uygulama:** işaretli veri setlerine uygulanan ROI, o veri seti açıldığında otomatik yüklenir.
+  Daha önce kayıtlı ROI'lerinin yerine geçer.
+
+### Veri setini görsel oynatma
+
+* **Oynatıcı:** Image sekmesinin altında başa dön, önceki, oynat/duraklat ve sonraki kare düğmeleri,
+  bir kaydırma çubuğu ve hız seçimi (2–50 fps ya da *max*) var. Kayıt kare kare ekranda izlenebilir
+  ve ROI herhangi bir karede çizilebilir.
+* **Show frames while measuring:** isteğe bağlıdır. Seçilirse RUN sırasında ölçülen kareler ekrana
+  basılır; ölçümü yavaşlatmamak için saniyede en fazla ~15 kare.
 
 İsteğe bağlı: "Also save per-frame values" ile kare bazında değerler ayrı bir CSV'ye yazılır.
 

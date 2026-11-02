@@ -1,9 +1,12 @@
 #include "MainWindow.h"
 
+#include "FramePlayer.h"
 #include "FrameSource.h"
+#include "ImageUtils.h"
 #include "MeasureWorker.h"
 #include "Metrics.h"
 #include "ResultTable.h"
+#include "RoiApplyDialog.h"
 #include "RoiView.h"
 #include "TrendView.h"
 
@@ -38,23 +41,6 @@
 #include <cstdlib>
 
 namespace {
-
-// Raw frame -> 8-bit RGB QImage for display (min/max stretch for > 8-bit data).
-QImage toQImage(const cv::Mat &m)
-{
-    cv::Mat u8, rgb;
-    if (m.depth() == CV_8U)
-        u8 = m;
-    else
-        cv::normalize(m, u8, 0, 255, cv::NORM_MINMAX, CV_8U);
-    if (u8.channels() == 1)
-        cv::cvtColor(u8, rgb, cv::COLOR_GRAY2RGB);
-    else if (u8.channels() == 4)
-        cv::cvtColor(u8, rgb, cv::COLOR_BGRA2RGB);
-    else
-        cv::cvtColor(u8, rgb, cv::COLOR_BGR2RGB);
-    return QImage(rgb.data, rgb.cols, rgb.rows, int(rgb.step), QImage::Format_RGB888).copy();
-}
 
 QTableWidgetItem *cell(const QString &text)
 {
@@ -115,12 +101,20 @@ MainWindow::MainWindow(QWidget *parent)
     iv->addWidget(labelBox);
 
     QGroupBox *roiBox = new QGroupBox(tr("3. ROI (drag on the image)"));
-    QHBoxLayout *roiRow = new QHBoxLayout(roiBox);
+    QVBoxLayout *roiV = new QVBoxLayout(roiBox);
+    QHBoxLayout *roiRow = new QHBoxLayout;
     m_roiLabel = new QLabel;
     QPushButton *bFull = new QPushButton(tr("Full frame"));
     connect(bFull, &QPushButton::clicked, this, &MainWindow::setFullFrame);
     roiRow->addWidget(m_roiLabel, 1);
     roiRow->addWidget(bFull);
+    roiV->addLayout(roiRow);
+    m_applyRoi = new QPushButton(tr("Apply this ROI to other datasets..."));
+    m_applyRoi->setToolTip(tr("Optional: use the same ROI for other recordings. Their first frames are shown with "
+                              "the ROI before anything is changed."));
+    m_applyRoi->setEnabled(false);
+    connect(m_applyRoi, &QPushButton::clicked, this, &MainWindow::applyRoiToOthers);
+    roiV->addWidget(m_applyRoi);
     iv->addWidget(roiBox);
 
     QGroupBox *outBox = new QGroupBox(tr("4. Measurement"));
@@ -145,6 +139,11 @@ MainWindow::MainWindow(QWidget *parent)
     of->addRow(tr("Results file"), resRow);
     m_frameCsv = new QCheckBox(tr("Also save per-frame values"));
     of->addRow(m_frameCsv);
+    m_showFrames = new QCheckBox(tr("Show frames while measuring"));
+    m_showFrames->setToolTip(tr("Displays the frames being measured in the Image tab (about 15 per second, so "
+                                "the measurement is not slowed down)."));
+    m_showFrames->setChecked(s.value("showFrames", false).toBool());
+    of->addRow(m_showFrames);
     iv->addWidget(outBox);
 
     QGroupBox *metricsBox = new QGroupBox(tr("Algorithms (all run on every recording)"));
@@ -181,9 +180,17 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ---------------- outputs (right) ----------------
     m_tabs = new QTabWidget;
+    QWidget *imagePage = new QWidget;
+    QVBoxLayout *ip = new QVBoxLayout(imagePage);
+    ip->setContentsMargins(0, 0, 0, 0);
+    ip->setSpacing(2);
     m_view = new RoiView;
     connect(m_view, &RoiView::roiSelected, this, &MainWindow::onRoiSelected);
-    m_tabs->addTab(m_view, tr("Image / ROI"));
+    ip->addWidget(m_view, 1);
+    m_player = new FramePlayer;
+    connect(m_player, &FramePlayer::frameReady, this, &MainWindow::showFrame);
+    ip->addWidget(m_player);
+    m_tabs->addTab(imagePage, tr("Image / ROI"));
 
     m_results = new QTableWidget;
     m_results->verticalHeader()->setVisible(false);
@@ -276,12 +283,15 @@ bool MainWindow::openRecording(const QString &path)
                                                                 : QString::fromStdString(err));
         return false;
     }
-    m_path = path;
-    m_pathEdit->setText(path);
+    m_path = QDir::cleanPath(path);
+    m_pathEdit->setText(m_path);
     m_info->setText(QString::fromStdString(src->description()));
     m_view->setImage(toQImage(first));
-    // the ROI drawn last time for this recording is remembered
-    m_roi = QSettings().value("roi/" + path).toRect();
+    m_player->setSource(m_path);
+    m_applyRoi->setEnabled(true);
+    rememberRecording(m_path);
+    // the ROI drawn last time for this recording (or applied from another one) is remembered
+    m_roi = QSettings().value("roi/" + m_path).toRect();
     m_view->setRoi(m_roi);
     updateRoiLabel();
     m_tabs->setCurrentIndex(0);
@@ -316,6 +326,65 @@ void MainWindow::updateRoiLabel()
                                               .arg(m_roi.height()));
 }
 
+void MainWindow::showFrame(const QImage &image, int frameIndex)
+{
+    m_view->setImage(image); // the ROI stays drawn on top
+    if (m_thread)
+        m_status->setText(tr("measuring frame %1").arg(frameIndex + 1));
+}
+
+void MainWindow::rememberRecording(const QString &path)
+{
+    QSettings s;
+    QStringList recent = s.value("recentRecordings").toStringList();
+    recent.removeAll(path);
+    recent.prepend(path);
+    while (recent.size() > 50)
+        recent.removeLast();
+    s.setValue("recentRecordings", recent);
+}
+
+// Candidates for "apply ROI": recordings of the results file and recently opened ones.
+QStringList MainWindow::knownRecordings() const
+{
+    QStringList paths;
+    turb::Table table;
+    if (QFileInfo::exists(m_resultsEdit->text().trimmed()) &&
+        turb::loadTable(m_resultsEdit->text().trimmed().toStdString(), table, nullptr)) {
+        const int c = table.column("source");
+        if (c >= 0)
+            for (const std::vector<std::string> &r : table.rows)
+                if (size_t(c) < r.size()) {
+                    const QString p = QDir::cleanPath(QString::fromStdString(r[size_t(c)]));
+                    if (!paths.contains(p))
+                        paths << p;
+                }
+    }
+    for (const QString &p : QSettings().value("recentRecordings").toStringList())
+        if (!paths.contains(p) && QFileInfo::exists(p))
+            paths << p;
+    paths.removeAll(m_path);
+    return paths;
+}
+
+void MainWindow::applyRoiToOthers()
+{
+    if (m_path.isEmpty())
+        return;
+    m_player->pause();
+    RoiApplyDialog dlg(m_roi, m_path, knownRecordings(), this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    const QStringList applied = dlg.appliedTo();
+    log(tr("ROI %1 applied to %2 dataset(s): %3")
+            .arg(m_roiLabel->text())
+            .arg(applied.size())
+            .arg(applied.join(", ")));
+    for (const QString &p : applied)
+        rememberRecording(p);
+    m_status->setText(tr("ROI applied to %1 dataset(s); it is used when they are opened.").arg(applied.size()));
+}
+
 void MainWindow::chooseResultsFile()
 {
     const QString f = QFileDialog::getSaveFileName(this, tr("Results file (rows are appended)"), m_resultsEdit->text(),
@@ -340,6 +409,10 @@ QStringList MainWindow::categoryOrder() const
 
 void MainWindow::setRunning(bool running)
 {
+    // the player and the measurement would both draw into the image view
+    if (running)
+        m_player->pause();
+    m_player->setEnabled(!running && !m_path.isEmpty());
     m_inputs->setEnabled(!running);
     m_runButton->setEnabled(!running);
     m_cancelButton->setEnabled(running);
@@ -380,12 +453,14 @@ void MainWindow::run()
     }
     QSettings().setValue("resultsFile", results);
     QSettings().setValue("windowLength", m_window->value());
+    QSettings().setValue("showFrames", m_showFrames->isChecked());
 
     m_thread = new QThread(this);
-    m_worker = new MeasureWorker(rec, settings, results);
+    m_worker = new MeasureWorker(rec, settings, results, m_showFrames->isChecked());
     m_worker->moveToThread(m_thread);
     connect(m_thread, &QThread::started, m_worker, &MeasureWorker::run);
     connect(m_worker, &MeasureWorker::progress, this, &MainWindow::onProgress);
+    connect(m_worker, &MeasureWorker::frame, this, &MainWindow::showFrame);
     connect(m_worker, &MeasureWorker::done, this, &MainWindow::onDone);
     connect(m_worker, &MeasureWorker::done, m_thread, &QThread::quit);
     connect(m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
@@ -397,6 +472,8 @@ void MainWindow::run()
         log(tr("Per-frame values -> %1").arg(QString::fromStdString(settings.frameCsvPath)));
     m_progress->setValue(0);
     m_status->setText(tr("Running..."));
+    if (m_showFrames->isChecked())
+        m_tabs->setCurrentIndex(0);
     setRunning(true);
     m_thread->start();
 }
@@ -427,7 +504,8 @@ void MainWindow::onDone(bool ok, const QString &message)
     }
     m_progress->setValue(100);
     reloadResults();
-    m_tabs->setCurrentIndex(1);
+    if (!m_showFrames->isChecked())
+        m_tabs->setCurrentIndex(1);
     m_results->scrollToBottom();
 }
 
