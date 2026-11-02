@@ -39,7 +39,11 @@ isteğe bağlı **CLAHE** var (aşağıda).
 
 1. **Recording**: görüntü klasörü veya video aç.
 2. **Label**: kategori (LOW / MEDIUM / HIGH veya yeni bir ad; boş = etiketsiz) ve not
-   (saat, hava, pozlama…).
+   (saat, hava, pozlama…). **Her veri seti bir kez etiketlenir.** Etiket ve not o veri setiyle
+   birlikte kaydedilir ve veri seti her açıldığında otomatik gelir. Önceden ölçülmüş veri setlerinin
+   etiketi sonuç dosyasından alınır. Ölçülmüş bir veri setinin etiketi değiştirilirse, sonuç
+   dosyasındaki satırlarının da güncellenmesi önerilir (onayla); böylece bir veri seti iki
+   kategoride birden görünmez.
 3. **ROI**: görüntü üzerinde sürükle (kayıt bazında hatırlanır).
 4. **Preprocessing** (isteğe bağlı): CLAHE (aşağıda).
 5. **Measurement**: pencere uzunluğu (0 = tüm kayıt tek pencere) ve sonuç dosyası.

@@ -87,18 +87,27 @@ MainWindow::MainWindow(QWidget *parent)
     rv->addWidget(m_info);
     iv->addWidget(recBox);
 
-    QGroupBox *labelBox = new QGroupBox(tr("2. Label"));
+    QGroupBox *labelBox = new QGroupBox(tr("2. Label (saved with the dataset)"));
     QFormLayout *lf = new QFormLayout(labelBox);
     m_category = new QComboBox;
     m_category->setEditable(true);
     m_category->addItems(QStringList() << "LOW" << "MEDIUM" << "HIGH");
     m_category->setCurrentIndex(-1);
-    m_category->setToolTip(tr("Turbulence category of this recording (empty = unlabeled). "
+    m_category->setToolTip(tr("Turbulence category of this recording (empty = unlabeled). It is saved with the "
+                              "dataset and loaded whenever the dataset is opened again. "
                               "The order of the list is used as LOW -> HIGH in the summary."));
     m_note = new QLineEdit;
     m_note->setPlaceholderText(tr("time, weather, exposure, distance ..."));
     lf->addRow(tr("Category"), m_category);
     lf->addRow(tr("Note"), m_note);
+    m_labelState = new QLabel;
+    m_labelState->setToolTip(tr("Every dataset is labeled once: the category and note are saved with it and "
+                                "loaded whenever it is opened again."));
+    lf->addRow(m_labelState);
+    connect(m_category, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated), this,
+            [this](int) { commitLabel(); });
+    connect(m_category->lineEdit(), &QLineEdit::editingFinished, this, &MainWindow::commitLabel);
+    connect(m_note, &QLineEdit::editingFinished, this, &MainWindow::commitLabel);
     iv->addWidget(labelBox);
 
     QGroupBox *roiBox = new QGroupBox(tr("3. ROI (drag on the image)"));
@@ -326,6 +335,7 @@ bool MainWindow::openRecording(const QString &path)
                                                                 : QString::fromStdString(err));
         return false;
     }
+    commitLabel(); // an unfinished edit of the previous dataset's label
     m_path = QDir::cleanPath(path);
     m_pathEdit->setText(m_path);
     m_info->setText(QString::fromStdString(src->description()));
@@ -337,6 +347,7 @@ bool MainWindow::openRecording(const QString &path)
     m_roi = QSettings().value("roi/" + m_path).toRect();
     m_view->setRoi(m_roi);
     updateRoiLabel();
+    loadLabel();
     m_tabs->setCurrentIndex(0);
     log(tr("Opened %1 (%2)").arg(path, QString::fromStdString(src->description())));
     return true;
@@ -359,6 +370,101 @@ void MainWindow::setFullFrame()
     m_view->setRoi(m_roi);
     updateRoiLabel();
     m_player->refresh();
+}
+
+void MainWindow::loadLabel()
+{
+    m_loadingLabel = true;
+    QSettings s;
+    QString category, note;
+    bool fromResults = false;
+    if (s.contains("category/" + m_path)) {
+        category = s.value("category/" + m_path).toString();
+        note = s.value("note/" + m_path).toString();
+    } else {
+        // measured before labels were saved per dataset: take the label of its rows in the results file
+        turb::Table table;
+        bool found = false;
+        if (QFileInfo::exists(m_resultsEdit->text().trimmed()) &&
+            turb::loadTable(m_resultsEdit->text().trimmed().toStdString(), table, nullptr))
+            category = QString::fromStdString(turb::lastValue(table, m_path.toStdString(), "category", &found));
+        if (found) {
+            note = QString::fromStdString(turb::lastValue(table, m_path.toStdString(), "note"));
+            s.setValue("category/" + m_path, category);
+            s.setValue("note/" + m_path, note);
+            fromResults = true;
+        }
+    }
+    if (category.isEmpty()) {
+        m_category->setCurrentIndex(-1);
+        m_category->setEditText(QString());
+    } else {
+        if (m_category->findText(category) < 0)
+            m_category->addItem(category);
+        m_category->setCurrentIndex(m_category->findText(category));
+    }
+    m_note->setText(note);
+    m_loadingLabel = false;
+    updateLabelState(fromResults);
+}
+
+void MainWindow::commitLabel()
+{
+    if (m_loadingLabel || m_path.isEmpty())
+        return;
+    const QString category = m_category->currentText().trimmed();
+    const QString note = m_note->text().trimmed();
+    QSettings s;
+    const bool changed = !s.contains("category/" + m_path) || s.value("category/" + m_path).toString() != category;
+    s.setValue("category/" + m_path, category);
+    s.setValue("note/" + m_path, note);
+    if (!category.isEmpty() && m_category->findText(category) < 0)
+        m_category->addItem(category); // a new category name joins the order (after the existing ones)
+    updateLabelState();
+    if (!changed)
+        return;
+
+    // rows measured with another label would put the dataset into two categories
+    const QString results = m_resultsEdit->text().trimmed();
+    turb::Table table;
+    if (!QFileInfo::exists(results) || !turb::loadTable(results.toStdString(), table, nullptr))
+        return;
+    const int n = turb::countRowsToRelabel(table, m_path.toStdString(), category.toStdString());
+    if (n == 0)
+        return;
+    log(tr("Label of %1 set to '%2'").arg(QFileInfo(m_path).fileName(), category.isEmpty() ? tr("unlabeled") : category));
+    if (QMessageBox::question(
+            this, tr("Label"),
+            tr("The results file has %1 row(s) of this dataset with another label. Set them to '%2' too?\n\n"
+               "Otherwise the trend analysis sees the dataset in two categories.")
+                .arg(n)
+                .arg(category.isEmpty() ? tr("unlabeled") : category)) != QMessageBox::Yes)
+        return;
+    std::string err;
+    const int done = turb::relabelSource(results.toStdString(), m_path.toStdString(), category.toStdString(), &err);
+    if (done < 0) {
+        QMessageBox::warning(this, tr("Label"), QString::fromStdString(err));
+        return;
+    }
+    log(tr("%1 row(s) of %2 relabeled in the results file").arg(done).arg(QFileInfo(m_path).fileName()));
+    reloadResults();
+}
+
+void MainWindow::updateLabelState(bool fromResults)
+{
+    if (m_path.isEmpty()) {
+        m_labelState->clear();
+        return;
+    }
+    if (m_category->currentText().trimmed().isEmpty())
+        m_labelState->setText(QString::fromUtf8("<span style='color:#9a6700'>\xe2\x9a\xa0 ") +
+                              tr("Not labeled yet - choose a category once.") +
+                              "</span>");
+    else
+        m_labelState->setText(QString::fromUtf8("<span style='color:#1a7f37'>\xe2\x9c\x93 ") +
+                              (fromResults ? tr("Label taken from the results file.")
+                                           : tr("Label saved with this dataset.")) +
+                              "</span>");
 }
 
 turb::Preprocess MainWindow::preprocess() const
@@ -510,6 +616,7 @@ void MainWindow::run()
         return;
     }
 
+    commitLabel();
     turb::Recording rec;
     rec.path = m_path.toStdString();
     rec.category = m_category->currentText().trimmed().toStdString();

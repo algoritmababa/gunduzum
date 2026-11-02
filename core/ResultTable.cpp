@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <sstream>
 
 namespace turb {
@@ -78,20 +79,24 @@ static std::string number(double v)
     return os.str();
 }
 
-// Inserts the 'preprocess' column ("none") into a results file of the previous version.
-static bool upgradeResults(const std::string &csvPath, size_t at, std::string *error)
+// Rewrites a results file line by line: edit(fields, isHeader) may change every row.
+static bool rewriteTable(const std::string &csvPath,
+                         const std::function<void(std::vector<std::string> &, bool)> &edit, std::string *error)
 {
     std::vector<std::string> lines;
     {
         std::ifstream in(csvPath.c_str());
+        if (!in) {
+            if (error) *error = "Cannot read " + csvPath;
+            return false;
+        }
         std::string line;
         bool first = true;
         while (std::getline(in, line)) {
             if (line.empty())
                 continue;
             std::vector<std::string> fields = parseCsvLine(line);
-            if (fields.size() >= at)
-                fields.insert(fields.begin() + long(at), first ? "preprocess" : "none");
+            edit(fields, first);
             first = false;
             std::string joined;
             for (size_t i = 0; i < fields.size(); ++i)
@@ -99,7 +104,7 @@ static bool upgradeResults(const std::string &csvPath, size_t at, std::string *e
             lines.push_back(joined);
         }
     }
-    const std::string tmp = csvPath + ".upgrade.tmp";
+    const std::string tmp = csvPath + ".rewrite.tmp";
     {
         std::ofstream o(tmp.c_str(), std::ios::out | std::ios::trunc);
         for (const std::string &l : lines)
@@ -112,10 +117,79 @@ static bool upgradeResults(const std::string &csvPath, size_t at, std::string *e
     }
     std::remove(csvPath.c_str()); // rename() does not replace an existing file on Windows
     if (std::rename(tmp.c_str(), csvPath.c_str()) != 0) {
-        if (error) *error = "Cannot replace " + csvPath + " (the upgraded copy is " + tmp + ")";
+        if (error) *error = "Cannot replace " + csvPath + " (the new copy is " + tmp + ")";
         return false;
     }
     return true;
+}
+
+// Inserts the 'preprocess' column ("none") into a results file of the previous version.
+static bool upgradeResults(const std::string &csvPath, size_t at, std::string *error)
+{
+    return rewriteTable(csvPath,
+                        [at](std::vector<std::string> &fields, bool header) {
+                            if (fields.size() >= at)
+                                fields.insert(fields.begin() + long(at), header ? "preprocess" : "none");
+                        },
+                        error);
+}
+
+static std::string trimSlashes(std::string p)
+{
+    while (p.size() > 1 && (p.back() == '/' || p.back() == '\\'))
+        p.pop_back();
+    return p;
+}
+
+int countRowsToRelabel(const Table &table, const std::string &source, const std::string &category)
+{
+    const int cSrc = table.column("source"), cCat = table.column("category");
+    if (cSrc < 0 || cCat < 0)
+        return 0;
+    int n = 0;
+    for (const std::vector<std::string> &r : table.rows)
+        if (size_t(std::max(cSrc, cCat)) < r.size() && trimSlashes(r[size_t(cSrc)]) == trimSlashes(source) &&
+            r[size_t(cCat)] != category)
+            ++n;
+    return n;
+}
+
+std::string lastValue(const Table &table, const std::string &source, const std::string &column, bool *found)
+{
+    const int cSrc = table.column("source"), cCat = table.column(column);
+    if (found)
+        *found = false;
+    std::string cat;
+    if (cSrc < 0 || cCat < 0)
+        return cat;
+    for (const std::vector<std::string> &r : table.rows)
+        if (size_t(std::max(cSrc, cCat)) < r.size() && trimSlashes(r[size_t(cSrc)]) == trimSlashes(source)) {
+            cat = r[size_t(cCat)];
+            if (found)
+                *found = true;
+        }
+    return cat;
+}
+
+int relabelSource(const std::string &csvPath, const std::string &source, const std::string &category,
+                  std::string *error)
+{
+    Table t;
+    if (!loadTable(csvPath, t, error))
+        return -1;
+    const int n = countRowsToRelabel(t, source, category);
+    if (n == 0)
+        return 0;
+    const int cSrc = t.column("source"), cCat = t.column("category");
+    const std::string src = trimSlashes(source);
+    const bool ok = rewriteTable(csvPath,
+                                 [&](std::vector<std::string> &f, bool header) {
+                                     if (!header && size_t(std::max(cSrc, cCat)) < f.size() &&
+                                         trimSlashes(f[size_t(cSrc)]) == src)
+                                         f[size_t(cCat)] = category;
+                                 },
+                                 error);
+    return ok ? n : -1;
 }
 
 bool appendResults(const std::string &csvPath, const Recording &rec, const MeasureOutput &out, std::string *error)

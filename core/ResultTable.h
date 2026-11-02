@@ -29,6 +29,18 @@ bool appendResults(const std::string &csvPath, const Recording &rec, const Measu
 
 bool loadTable(const std::string &csvPath, Table &table, std::string *error);
 
+// Labels: every recording (source path) carries one category in all of its rows.
+// A column of the last row of a recording, e.g. its category or note
+// ("" and *found = false when the recording has no rows).
+std::string lastValue(const Table &table, const std::string &source, const std::string &column,
+                      bool *found = nullptr);
+// Rows of a recording whose category differs from the given one.
+int countRowsToRelabel(const Table &table, const std::string &source, const std::string &category);
+// Sets the category of every row of a recording in the results file; returns the number of
+// changed rows, -1 on error.
+int relabelSource(const std::string &csvPath, const std::string &source, const std::string &category,
+                  std::string *error);
+
 // Preprocessing variants in a table, in order of appearance ("none" for a table without the column).
 std::vector<std::string> preprocessVariants(const Table &table);
 // The rows measured with one preprocessing variant (a table without the column counts as "none").

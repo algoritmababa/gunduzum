@@ -58,6 +58,10 @@ private:
     QStringList knownRecordings() const;
     QStringList categoryOrder() const;
     turb::Preprocess preprocess() const;
+    // Labels are stored per dataset (once): loaded when it is opened, saved when changed.
+    void loadLabel();
+    void commitLabel();
+    void updateLabelState(bool fromResults = false);
     void preprocessChanged();
 
     // inputs
@@ -65,6 +69,8 @@ private:
     QLabel *m_info;
     QComboBox *m_category;
     QLineEdit *m_note;
+    QLabel *m_labelState;
+    bool m_loadingLabel = false;
     QLabel *m_roiLabel;
     QSpinBox *m_window;
     QLineEdit *m_resultsEdit;

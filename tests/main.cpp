@@ -535,6 +535,20 @@ int main(int argc, char **argv)
                   filterPreprocess(noColumn, "none").rows.size() == 1 &&
                   filterPreprocess(noColumn, variants[1]).rows.empty(),
               "table without the column counts as none");
+        // labels: one category per recording, relabeling rewrites its rows only
+        bool found = false;
+        CHECK(lastValue(m, ref, "category", &found) == "LOW" && found, "last category of a recording");
+        CHECK(lastValue(m, ref + "/", "category", &found) == "LOW" && found, "trailing slash ignored");
+        lastValue(m, hazy, "category", &found);
+        CHECK(!found, "recording without rows");
+        CHECK(countRowsToRelabel(m, ref, "HIGH") == 2 && countRowsToRelabel(m, ref, "LOW") == 0, "rows to relabel");
+        CHECK(relabelSource(mixed, ref, "HIGH", &err) == 2, "relabel " << err);
+        Table m2;
+        CHECK(loadTable(mixed, m2, &err) && m2.rows.size() == 3, "relabeled file");
+        CHECK(m2.rows[1][size_t(m2.column("category"))] == "HIGH" && m2.rows[2][size_t(m2.column("category"))] == "HIGH" &&
+                  m2.rows[0][size_t(m2.column("category"))] == "1" && m2.rows[0][size_t(m2.column("note"))] == "a, b",
+              "only the recording's rows changed");
+        CHECK(relabelSource(mixed, ref, "HIGH", &err) == 0, "nothing to relabel");
         Table both = t;
         for (const std::vector<std::string> &row : m.rows)
             both.rows.push_back(row);

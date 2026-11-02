@@ -154,8 +154,10 @@ void RoiApplyDialog::addCandidate(const QString &path)
     case Outside: status = QString::fromUtf8("\xe2\x9c\x95 ") + tr("outside the image"); color = QColor("#cf222e"); break;
     case Unreadable: status = QString::fromUtf8("\xe2\x9c\x95 ") + tr("cannot read"); color = QColor("#cf222e"); break;
     }
-    QListWidgetItem *it = new QListWidgetItem(QIcon(pix), QFileInfo(clean).fileName() + "\n" + sizeText +
-                                                              (sizeText.isEmpty() ? "" : "  ") + status);
+    const QString category = QSettings().value("category/" + clean).toString();
+    QListWidgetItem *it = new QListWidgetItem(QIcon(pix), QFileInfo(clean).fileName() +
+                                                              (category.isEmpty() ? QString() : "  [" + category + "]") +
+                                                              "\n" + sizeText + (sizeText.isEmpty() ? "" : "  ") + status);
     it->setData(kPathRole, clean);
     it->setData(kFitRole, int(fit));
     it->setToolTip(clean);
