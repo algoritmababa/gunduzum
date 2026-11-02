@@ -61,6 +61,8 @@ private:
 
     QLineEdit *m_csv;
     QComboBox *m_unit;
+    QComboBox *m_preprocess; // preprocessing variant of the rows that are analyzed
+    QString m_variant;       // variant of the current report
     QDoubleSpinBox *m_alpha;
     QPushButton *m_saveButton;
     QLabel *m_summaryTitle;

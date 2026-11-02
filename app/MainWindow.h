@@ -11,6 +11,7 @@ class RoiView;
 class TrendView;
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -56,6 +57,8 @@ private:
     void rememberRecording(const QString &path);
     QStringList knownRecordings() const;
     QStringList categoryOrder() const;
+    turb::Preprocess preprocess() const;
+    void preprocessChanged();
 
     // inputs
     QLineEdit *m_pathEdit;
@@ -67,6 +70,10 @@ private:
     QLineEdit *m_resultsEdit;
     QCheckBox *m_frameCsv;
     QCheckBox *m_showFrames;
+    QCheckBox *m_clahe;
+    QDoubleSpinBox *m_clipLimit;
+    QSpinBox *m_tiles;
+    QCheckBox *m_previewPre;
     QPushButton *m_applyRoi;
     QWidget *m_inputs;
     QPushButton *m_runButton, *m_cancelButton;

@@ -17,6 +17,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -117,7 +118,44 @@ MainWindow::MainWindow(QWidget *parent)
     roiV->addWidget(m_applyRoi);
     iv->addWidget(roiBox);
 
-    QGroupBox *outBox = new QGroupBox(tr("4. Measurement"));
+    QGroupBox *preBox = new QGroupBox(tr("4. Preprocessing (optional)"));
+    QFormLayout *pf = new QFormLayout(preBox);
+    m_clahe = new QCheckBox(tr("CLAHE - local contrast equalization"));
+    m_clahe->setToolTip(tr("Contrast limited adaptive histogram equalization of the ROI, frame by frame, before the "
+                           "algorithms. Evens out brightness / contrast differences between recordings, but it also "
+                           "changes the brightness fluctuations inside a recording (scintillation). The variant is "
+                           "stored in the 'preprocess' column, so the trend analysis can compare runs with and "
+                           "without it."));
+    m_clahe->setChecked(s.value("clahe", false).toBool());
+    pf->addRow(m_clahe);
+    m_clipLimit = new QDoubleSpinBox;
+    m_clipLimit->setRange(0.1, 40.0);
+    m_clipLimit->setDecimals(1);
+    m_clipLimit->setSingleStep(0.5);
+    m_clipLimit->setValue(s.value("claheClip", 2.0).toDouble());
+    m_clipLimit->setToolTip(tr("Contrast limit: higher = stronger equalization (and more amplified noise). "
+                               "Around 2-4 = mild, 40 (OpenCV default) = close to full histogram equalization."));
+    pf->addRow(tr("Clip limit"), m_clipLimit);
+    m_tiles = new QSpinBox;
+    m_tiles->setRange(1, 64);
+    m_tiles->setValue(s.value("claheTiles", 8).toInt());
+    m_tiles->setToolTip(tr("The ROI is split into N x N tiles that are equalized separately (8 = OpenCV default). "
+                           "1 = one histogram for the whole ROI."));
+    pf->addRow(tr("Tiles per side"), m_tiles);
+    m_previewPre = new QCheckBox(tr("Show the result on the image"));
+    m_previewPre->setToolTip(tr("The ROI on the image (player and measurement view) shows what the algorithms "
+                                "see after the preprocessing."));
+    m_previewPre->setChecked(s.value("claheShow", true).toBool());
+    pf->addRow(m_previewPre);
+    connect(m_clahe, &QCheckBox::toggled, this, &MainWindow::preprocessChanged);
+    connect(m_previewPre, &QCheckBox::toggled, this, &MainWindow::preprocessChanged);
+    connect(m_clipLimit, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged), this,
+            &MainWindow::preprocessChanged);
+    connect(m_tiles, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged), this,
+            &MainWindow::preprocessChanged);
+    iv->addWidget(preBox);
+
+    QGroupBox *outBox = new QGroupBox(tr("5. Measurement"));
     QFormLayout *of = new QFormLayout(outBox);
     m_window = new QSpinBox;
     m_window->setRange(0, 10000000);
@@ -214,6 +252,7 @@ MainWindow::MainWindow(QWidget *parent)
     setCentralWidget(split);
 
     updateRoiLabel();
+    preprocessChanged();
     reloadResults();
     log(tr("OpenCV %1").arg(CV_VERSION));
 }
@@ -233,6 +272,10 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QSettings s;
     s.setValue("windowLength", m_window->value());
     s.setValue("resultsFile", m_resultsEdit->text());
+    s.setValue("clahe", m_clahe->isChecked());
+    s.setValue("claheClip", m_clipLimit->value());
+    s.setValue("claheTiles", m_tiles->value());
+    s.setValue("claheShow", m_previewPre->isChecked());
     if (m_thread && m_thread->isRunning()) {
         m_worker->cancel();
         m_thread->quit();
@@ -305,6 +348,7 @@ void MainWindow::onRoiSelected(const QRect &roi)
     if (!m_path.isEmpty())
         QSettings().setValue("roi/" + m_path, roi);
     updateRoiLabel();
+    m_player->refresh(); // the preprocessing preview follows the ROI
 }
 
 void MainWindow::setFullFrame()
@@ -314,6 +358,40 @@ void MainWindow::setFullFrame()
         QSettings().remove("roi/" + m_path);
     m_view->setRoi(m_roi);
     updateRoiLabel();
+    m_player->refresh();
+}
+
+turb::Preprocess MainWindow::preprocess() const
+{
+    turb::Preprocess pp;
+    pp.clahe = m_clahe->isChecked();
+    pp.clipLimit = m_clipLimit->value();
+    pp.tileGrid = m_tiles->value();
+    return pp;
+}
+
+void MainWindow::preprocessChanged()
+{
+    const bool on = m_clahe->isChecked();
+    m_clipLimit->setEnabled(on);
+    m_tiles->setEnabled(on);
+    m_previewPre->setEnabled(on);
+    if (on && m_previewPre->isChecked()) {
+        const turb::Preprocess pp = preprocess();
+        m_player->setFilter([this, pp](cv::Mat &frame) {
+            turb::Roi r;
+            r.x = m_roi.x();
+            r.y = m_roi.y();
+            r.width = m_roi.width();
+            r.height = m_roi.height();
+            if (m_roi.isEmpty())
+                r = turb::Roi();
+            turb::previewPreprocess(frame, turb::effectiveRoi(r, frame.size()), pp);
+        });
+    } else {
+        m_player->setFilter(std::function<void(cv::Mat &)>());
+    }
+    m_player->refresh();
 }
 
 void MainWindow::updateRoiLabel()
@@ -444,6 +522,7 @@ void MainWindow::run()
     }
     turb::MeasureSettings settings;
     settings.windowLength = m_window->value();
+    settings.preprocess = preprocess();
     if (m_frameCsv->isChecked()) {
         const QFileInfo rf(results);
         settings.frameCsvPath = (rf.absolutePath() + "/" + rf.completeBaseName() + "_" +
@@ -456,7 +535,7 @@ void MainWindow::run()
     QSettings().setValue("showFrames", m_showFrames->isChecked());
 
     m_thread = new QThread(this);
-    m_worker = new MeasureWorker(rec, settings, results, m_showFrames->isChecked());
+    m_worker = new MeasureWorker(rec, settings, results, m_showFrames->isChecked(), m_previewPre->isChecked());
     m_worker->moveToThread(m_thread);
     connect(m_thread, &QThread::started, m_worker, &MeasureWorker::run);
     connect(m_worker, &MeasureWorker::progress, this, &MainWindow::onProgress);
@@ -466,8 +545,9 @@ void MainWindow::run()
     connect(m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     connect(m_thread, &QThread::finished, m_thread, &QObject::deleteLater);
 
-    log(tr("Measuring %1  [category: %2]").arg(m_path, rec.category.empty() ? tr("unlabeled")
-                                                                              : QString::fromStdString(rec.category)));
+    log(tr("Measuring %1  [category: %2, preprocessing: %3]")
+            .arg(m_path, rec.category.empty() ? tr("unlabeled") : QString::fromStdString(rec.category),
+                 QString::fromStdString(settings.preprocess.label())));
     if (!settings.frameCsvPath.empty())
         log(tr("Per-frame values -> %1").arg(QString::fromStdString(settings.frameCsvPath)));
     m_progress->setValue(0);

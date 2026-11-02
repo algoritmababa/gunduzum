@@ -25,9 +25,24 @@ struct Recording {
     Roi roi;
 };
 
+// Optional preprocessing, applied to the ROI crop of every frame before the metrics see it.
+// CLAHE = contrast limited adaptive histogram equalization: the ROI is divided into
+// tileGrid x tileGrid tiles, the histogram of every tile is equalized (clipped at clipLimit)
+// and the tiles are blended. It works frame by frame, so it also changes the temporal
+// brightness fluctuations (scintillation) - compare the results with and without it.
+struct Preprocess {
+    bool clahe = false;
+    double clipLimit = 2.0; // OpenCV clip limit (relative to a flat histogram)
+    int tileGrid = 8;       // tiles per side of the ROI
+
+    // Stored in the results table ("none" / "clahe:clip=2,tiles=8").
+    std::string label() const;
+};
+
 struct MeasureSettings {
     int windowLength = 0;      // frames per window, 0 = the whole recording is one window
     std::string frameCsvPath;  // optional: per-frame values are written here
+    Preprocess preprocess;
 };
 
 // One window = one row of the results table.
@@ -45,6 +60,7 @@ struct MeasureOutput {
     std::string error;
     std::string recordingId; // file / folder name
     cv::Rect roi;            // ROI actually used (clamped to the image)
+    std::string preprocess;  // Preprocess::label() of the settings used
     int frameCount = 0;
     std::vector<WindowResult> windows;
 };
@@ -60,8 +76,12 @@ MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, con
                       const std::atomic<bool> *cancel, const FrameFn &frameView = FrameFn());
 
 cv::Rect effectiveRoi(const Roi &roi, const cv::Size &frameSize);
-// raw frame -> ROI crop -> grayscale -> CV_32F (no other preprocessing)
-void toGray32f(const cv::Mat &raw, const cv::Rect &roi, cv::Mat &out);
+// raw frame -> ROI crop -> grayscale (-> CLAHE when enabled) -> CV_32F.
+// CLAHE needs 8- or 16-bit images; other depths throw a cv::Exception.
+void toGray32f(const cv::Mat &raw, const cv::Rect &roi, cv::Mat &out, const Preprocess &pp = Preprocess());
+// For display: replaces the ROI of a raw frame with what the metrics see after the
+// preprocessing (gray, CLAHE). Does nothing when no preprocessing is enabled.
+void previewPreprocess(cv::Mat &frame, const cv::Rect &roi, const Preprocess &pp);
 std::string recordingId(const std::string &path);
 
 } // namespace turb

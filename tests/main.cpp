@@ -439,6 +439,111 @@ int main(int argc, char **argv)
         CHECK(!appendResults(other, rec, out, &err), "different header refused");
     }
 
+    // --- CLAHE preprocessing ----------------------------------------------------------------
+    {
+        // the same scene as 8-bit images: as recorded, and with lower contrast + an offset (haze)
+        const std::string ref = work + "/clahe_ref", hazy = work + "/clahe_hazy";
+        makeDir(ref);
+        makeDir(hazy);
+        for (int i = 0; i < N; ++i) {
+            const std::string name = "/frame_" + std::to_string(i) + ".png";
+            const cv::Mat src = cv::imread(motionDir + name, cv::IMREAD_ANYDEPTH);
+            cv::Mat a, b;
+            src.convertTo(a, CV_8U, 1.0 / 256.0);
+            src.convertTo(b, CV_8U, 0.6 / 256.0, 60.0);
+            cv::imwrite(ref + name, a);
+            cv::imwrite(hazy + name, b);
+        }
+        MeasureSettings plain, eq;
+        eq.preprocess.clahe = true;
+        eq.preprocess.clipLimit = 2.0;
+        eq.preprocess.tileGrid = 4;
+        CHECK(plain.preprocess.label() == "none", "label none");
+        CHECK(eq.preprocess.label() == "clahe:clip=2,tiles=4", "label clahe " << eq.preprocess.label());
+        Recording r1, r2;
+        r1.path = ref;
+        r2.path = hazy;
+        const MeasureOutput p1 = measure(r1, plain, ProgressFn(), nullptr), p2 = measure(r2, plain, ProgressFn(), nullptr);
+        const MeasureOutput e1 = measure(r1, eq, ProgressFn(), nullptr), e2 = measure(r2, eq, ProgressFn(), nullptr);
+        CHECK(p1.ok && p2.ok && e1.ok && e2.ok, "clahe measurements " << e1.error);
+        CHECK(e1.preprocess == "clahe:clip=2,tiles=4" && p1.preprocess == "none", "preprocess stored in output");
+        auto relDiff = [](const MeasureOutput &a, const MeasureOutput &b, const char *f) {
+            const double x = feature(a.windows[0], f), y = feature(b.windows[0], f);
+            return std::fabs(x - y) / std::fabs(x);
+        };
+        const double plainDiff = relDiff(p1, p2, "gradient_mean"), eqDiff = relDiff(e1, e2, "gradient_mean");
+        std::cout << "clahe: gradient difference hazy vs. original " << plainDiff << " without, " << eqDiff
+                  << " with CLAHE\n";
+        CHECK(eqDiff < plainDiff, "CLAHE reduces contrast / offset differences " << eqDiff << " vs " << plainDiff);
+        {
+            // a high clip limit (close to full histogram equalization) removes them almost completely
+            MeasureSettings strong;
+            strong.preprocess.clahe = true;
+            strong.preprocess.clipLimit = 40.0;
+            strong.preprocess.tileGrid = 4;
+            const MeasureOutput s1 = measure(r1, strong, ProgressFn(), nullptr), s2 = measure(r2, strong, ProgressFn(), nullptr);
+            const double strongDiff = relDiff(s1, s2, "gradient_mean");
+            std::cout << "clahe: clip 40 -> " << strongDiff << "\n";
+            CHECK(strongDiff < 0.1 * plainDiff, "strong CLAHE evens out contrast / offset " << strongDiff);
+        }
+        // jitter stays measurable after CLAHE
+        CHECK(relDiff(p1, e1, "jitter_mean") < 0.25, "jitter after CLAHE " << relDiff(p1, e1, "jitter_mean"));
+        // 16-bit images are supported
+        Recording r16;
+        r16.path = motionDir;
+        CHECK(measure(r16, eq, ProgressFn(), nullptr).ok, "CLAHE on 16-bit images");
+
+        // preview changes only the ROI
+        cv::Mat frame = cv::imread(hazy + "/frame_0.png", cv::IMREAD_COLOR), before = frame.clone();
+        previewPreprocess(frame, cv::Rect(10, 10, 50, 40), eq.preprocess);
+        cv::Mat diff;
+        cv::absdiff(frame, before, diff);
+        cv::Mat outside = diff.clone();
+        outside(cv::Rect(10, 10, 50, 40)).setTo(0);
+        CHECK(cv::countNonZero(diff.reshape(1)) > 0 && cv::countNonZero(outside.reshape(1)) == 0,
+              "preview changes the ROI only");
+
+        // results: variant column, upgrade of an old file, one variant at a time
+        const std::string mixed = work + "/mixed.csv";
+        {
+            std::vector<std::string> oldCols = resultColumns();
+            oldCols.erase(std::find(oldCols.begin(), oldCols.end(), "preprocess"));
+            std::ofstream o(mixed.c_str());
+            for (size_t i = 0; i < oldCols.size(); ++i)
+                o << (i ? "," : "") << oldCols[i];
+            o << "\n";
+            for (size_t i = 0; i < oldCols.size(); ++i)
+                o << (i ? "," : "") << (oldCols[i] == "note" ? "\"a, b\"" : "1");
+            o << "\n";
+        }
+        r1.category = "LOW";
+        CHECK(appendResults(mixed, r1, p1, &err), "old results file upgraded " << err);
+        CHECK(appendResults(mixed, r1, e1, &err), "append clahe rows " << err);
+        Table m;
+        CHECK(loadTable(mixed, m, &err) && m.header == resultColumns(), "upgraded header");
+        CHECK(m.rows.size() == 3 && m.rows[0][size_t(m.column("preprocess"))] == "none" &&
+                  m.rows[0][size_t(m.column("note"))] == "a, b",
+              "old row keeps its values, preprocess = none");
+        const std::vector<std::string> variants = preprocessVariants(m);
+        CHECK(variants.size() == 2 && variants[0] == "none" && variants[1] == "clahe:clip=2,tiles=4", "variants");
+        CHECK(filterPreprocess(m, "none").rows.size() == 2 && filterPreprocess(m, variants[1]).rows.size() == 1,
+              "filter by variant");
+        Table noColumn;
+        noColumn.header = {"recording", "category"};
+        noColumn.rows.push_back({"x", "LOW"});
+        CHECK(preprocessVariants(noColumn) == std::vector<std::string>(1, "none") &&
+                  filterPreprocess(noColumn, "none").rows.size() == 1 &&
+                  filterPreprocess(noColumn, variants[1]).rows.empty(),
+              "table without the column counts as none");
+        Table both = t;
+        for (const std::vector<std::string> &row : m.rows)
+            both.rows.push_back(row);
+        bool warned = false;
+        for (const std::string &n : analyzeTrends(both, TrendOptions()).notes)
+            warned = warned || n.find("different preprocessing") != std::string::npos;
+        CHECK(warned, "mixed preprocessing is reported");
+    }
+
     testScenarios(work);
 
     std::cout << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";

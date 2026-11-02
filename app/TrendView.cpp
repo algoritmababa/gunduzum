@@ -18,6 +18,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QRegExp>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -318,8 +319,13 @@ TrendView::TrendView(QWidget *parent)
 QWidget *TrendView::buildToolbar()
 {
     QFrame *bar = card();
-    QHBoxLayout *h = new QHBoxLayout(bar);
-    h->setContentsMargins(12, 8, 12, 8);
+    QVBoxLayout *rows = new QVBoxLayout(bar);
+    rows->setContentsMargins(12, 8, 12, 8);
+    rows->setSpacing(6);
+    QHBoxLayout *h = new QHBoxLayout;
+    QHBoxLayout *h2 = new QHBoxLayout; // analysis options
+    rows->addLayout(h);
+    rows->addLayout(h2);
     h->addWidget(label(tr("Results CSV"), "muted"));
     m_csv = new QLineEdit;
     m_csv->setPlaceholderText(tr("results file with labeled measurements"));
@@ -328,16 +334,26 @@ QWidget *TrendView::buildToolbar()
     browse->setObjectName("secondary");
     connect(browse, &QPushButton::clicked, this, &TrendView::browse);
     h->addWidget(browse);
-    h->addSpacing(12);
-    h->addWidget(label(tr("Compare"), "muted"));
+    h2->addWidget(label(tr("Compare"), "muted"));
     m_unit = new QComboBox;
     m_unit->addItem(tr("recordings"));
     m_unit->addItem(tr("windows (optimistic)"));
     m_unit->setToolTip(tr("Recordings (recommended): the windows of a recording are averaged, because they are "
                           "not independent. Windows: every window counts - the significance is overstated."));
-    h->addWidget(m_unit);
-    h->addSpacing(8);
-    h->addWidget(label(QString::fromUtf8("\xce\xb1"), "muted"));
+    h2->addWidget(m_unit);
+    h2->addSpacing(12);
+    h2->addWidget(label(tr("Preprocessing"), "muted"));
+    m_preprocess = new QComboBox;
+    m_preprocess->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    m_preprocess->addItem("none");
+    m_preprocess->setToolTip(tr("Rows measured with this preprocessing are analyzed. Measure the same recordings "
+                                "with and without CLAHE into one results file and switch here to compare the "
+                                "verdicts. The list is filled from the file when you press Analyze."));
+    connect(m_preprocess, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated), this,
+            [this](int) { analyze(); });
+    h2->addWidget(m_preprocess);
+    h2->addSpacing(12);
+    h2->addWidget(label(QString::fromUtf8("\xce\xb1"), "muted"));
     m_alpha = new QDoubleSpinBox;
     m_alpha->setRange(0.001, 0.2);
     m_alpha->setDecimals(3);
@@ -345,7 +361,8 @@ QWidget *TrendView::buildToolbar()
     m_alpha->setValue(0.05);
     m_alpha->setToolTip(tr("Significance level: a trend counts as consistent when its corrected chance "
                            "probability is below this value."));
-    h->addWidget(m_alpha);
+    h2->addWidget(m_alpha);
+    h2->addStretch(1);
     h->addSpacing(12);
     QPushButton *analyze = new QPushButton(tr("Analyze"));
     analyze->setObjectName("primary");
@@ -390,6 +407,27 @@ void TrendView::analyze()
                              err.empty() ? tr("Choose a results CSV.") : QString::fromStdString(err));
         return;
     }
+    // one preprocessing variant at a time
+    {
+        const QString wanted = m_preprocess->currentText();
+        const std::vector<std::string> variants = preprocessVariants(table);
+        m_preprocess->clear();
+        int select = -1;
+        for (size_t i = 0; i < variants.size(); ++i) {
+            const QString v = QString::fromStdString(variants[i]);
+            m_preprocess->addItem(v);
+            if (v == wanted)
+                select = int(i);
+            else if (select < 0 && v == "none")
+                select = int(i);
+        }
+        if (m_preprocess->count() == 0)
+            m_preprocess->addItem("none");
+        m_preprocess->setCurrentIndex(std::max(0, select));
+        m_preprocess->setEnabled(m_preprocess->count() > 1);
+        m_variant = m_preprocess->currentText();
+        table = filterPreprocess(table, m_variant.toStdString());
+    }
     TrendOptions opt;
     if (m_orderProvider) {
         opt.categoryOrder.clear();
@@ -417,10 +455,11 @@ void TrendView::analyze()
     for (const AlgorithmTrend &a : m_report.algorithms)
         if (a.verdict == AlgorithmVerdict::Useful || a.verdict == AlgorithmVerdict::Promising)
             useful << QString::fromStdString(a.label);
-    emit logMessage(tr("Trend analysis of %1: %2 unit(s); useful / promising algorithms: %3")
+    emit logMessage(tr("Trend analysis of %1 [preprocessing: %4]: %2 unit(s); useful / promising algorithms: %3")
                         .arg(QFileInfo(path).fileName())
                         .arg(m_report.units)
-                        .arg(useful.isEmpty() ? tr("none") : useful.join(", ")));
+                        .arg(useful.isEmpty() ? tr("none") : useful.join(", "))
+                        .arg(m_variant));
 }
 
 void TrendView::save()
@@ -429,7 +468,11 @@ void TrendView::save()
         return;
     const QFileInfo src(m_csv->text().trimmed());
     const QString f = QFileDialog::getSaveFileName(this, tr("Save trend analysis"),
-                                                   src.absolutePath() + "/" + src.completeBaseName() + "_trend.csv",
+                                                   src.absolutePath() + "/" + src.completeBaseName() + "_trend" +
+                                                       (m_variant == "none" ? QString()
+                                                                            : "_" + QString(m_variant).replace(
+                                                                                        QRegExp("[^A-Za-z0-9.=]+"), "_")) +
+                                                       ".csv",
                                                    tr("CSV (*.csv)"));
     if (f.isEmpty())
         return;
@@ -452,7 +495,8 @@ void TrendView::rebuildSummary()
     m_summaryTitle->setText(tr("%1 %2 &nbsp;&nbsp;<span style='font-size:13px; font-weight:400'>%3</span>")
                                 .arg(m_report.units)
                                 .arg(m_perRecording ? tr("recordings") : tr("windows"))
-                                .arg(parts.join("&nbsp;&nbsp; ")));
+                                .arg(parts.join("&nbsp;&nbsp; ") + "&nbsp;&nbsp; " +
+                                     tr("preprocessing: %1").arg(m_variant.toHtmlEscaped())));
 
     // algorithm counters
     QLayout *chips = m_summaryChips->layout();

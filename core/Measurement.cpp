@@ -5,6 +5,7 @@
 
 #include <opencv2/imgproc/imgproc.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -18,16 +19,63 @@ cv::Rect effectiveRoi(const Roi &roi, const cv::Size &frameSize)
     return cv::Rect(roi.x, roi.y, roi.width, roi.height) & full;
 }
 
-void toGray32f(const cv::Mat &raw, const cv::Rect &roi, cv::Mat &out)
+std::string Preprocess::label() const
+{
+    if (!clahe)
+        return "none";
+    std::ostringstream os;
+    os << "clahe:clip=" << clipLimit << ",tiles=" << tileGrid;
+    return os.str();
+}
+
+// ROI crop -> gray in the frame's own depth (a header into raw when it is already gray)
+static cv::Mat grayRoi(const cv::Mat &raw, const cv::Rect &roi)
 {
     const cv::Mat view = raw(roi); // header only, no copy
-    if (view.channels() == 1) {
-        view.convertTo(out, CV_32F);
-        return;
-    }
+    if (view.channels() == 1)
+        return view;
     cv::Mat gray;
     cv::cvtColor(view, gray, view.channels() == 4 ? cv::COLOR_BGRA2GRAY : cv::COLOR_BGR2GRAY);
-    gray.convertTo(out, CV_32F);
+    return gray;
+}
+
+static void applyClahe(const cv::Mat &gray, cv::Mat &out, const Preprocess &pp)
+{
+    if (gray.depth() != CV_8U && gray.depth() != CV_16U)
+        CV_Error(cv::Error::StsUnsupportedFormat, "CLAHE needs 8-bit or 16-bit images");
+    const int tiles = std::max(1, pp.tileGrid);
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(pp.clipLimit, cv::Size(tiles, tiles));
+    clahe->apply(gray, out);
+}
+
+void toGray32f(const cv::Mat &raw, const cv::Rect &roi, cv::Mat &out, const Preprocess &pp)
+{
+    const cv::Mat gray = grayRoi(raw, roi);
+    if (!pp.clahe) {
+        gray.convertTo(out, CV_32F);
+        return;
+    }
+    cv::Mat eq;
+    applyClahe(gray, eq, pp);
+    eq.convertTo(out, CV_32F);
+}
+
+void previewPreprocess(cv::Mat &frame, const cv::Rect &roi, const Preprocess &pp)
+{
+    if (!pp.clahe || frame.empty())
+        return;
+    const cv::Rect r = roi & cv::Rect(0, 0, frame.cols, frame.rows);
+    if (r.area() <= 0)
+        return;
+    cv::Mat eq;
+    applyClahe(grayRoi(frame, r), eq, pp);
+    if (frame.channels() == 1) {
+        eq.copyTo(frame(r));
+        return;
+    }
+    cv::Mat colored;
+    cv::cvtColor(eq, colored, frame.channels() == 4 ? cv::COLOR_GRAY2BGRA : cv::COLOR_GRAY2BGR);
+    colored.copyTo(frame(r));
 }
 
 std::string recordingId(const std::string &path)
@@ -44,6 +92,7 @@ MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, con
 {
     MeasureOutput out;
     out.recordingId = recordingId(rec.path);
+    out.preprocess = settings.preprocess.label();
 
     std::string err;
     std::unique_ptr<FrameSource> src = FrameSource::create(rec.path, &err);
@@ -105,10 +154,14 @@ MeasureOutput measure(const Recording &rec, const MeasureSettings &settings, con
                         out.error = "ROI is outside the image.";
                         return out;
                     }
+                    if (settings.preprocess.clahe && raw.depth() != CV_8U && raw.depth() != CV_16U) {
+                        out.error = "CLAHE needs 8-bit or 16-bit images.";
+                        return out;
+                    }
                 }
                 if (frameView)
                     frameView(f, raw);
-                toGray32f(raw, out.roi, gray);
+                toGray32f(raw, out.roi, gray, settings.preprocess);
                 if (frameCsv.is_open())
                     frameCsv << w << "," << f;
                 for (size_t i = 0; i < metrics.size(); ++i) {

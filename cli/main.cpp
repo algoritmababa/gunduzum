@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
@@ -18,8 +19,10 @@ static void usage()
                  "  turbulence_measure --input <folder|video> --results <file.csv>\n"
                  "                     [--category LOW|MEDIUM|HIGH|...] [--note text]\n"
                  "                     [--roi x,y,w,h] [--window frames] [--frames-csv file.csv]\n"
+                 "                     [--clahe clipLimit,tiles   e.g. --clahe 2,8]\n"
                  "  turbulence_measure --analyze <file.csv> [--order LOW,MEDIUM,HIGH]\n"
-                 "                     [--unit recording|window] [--alpha 0.05] [--out trend.csv]\n";
+                 "                     [--unit recording|window] [--alpha 0.05] [--out trend.csv]\n"
+                 "                     [--preprocess none|clahe:clip=2,tiles=8]\n";
 }
 
 static std::vector<std::string> split(const std::string &s)
@@ -32,7 +35,8 @@ static std::vector<std::string> split(const std::string &s)
     return out;
 }
 
-static int analyze(const std::string &path, const TrendOptions &opt, const std::string &outPath)
+static int analyze(const std::string &path, const TrendOptions &opt, const std::string &outPath,
+                   std::string variant)
 {
     Table t;
     std::string err;
@@ -40,6 +44,18 @@ static int analyze(const std::string &path, const TrendOptions &opt, const std::
         std::cerr << err << "\n";
         return 1;
     }
+    // one preprocessing variant at a time ("none" when present, otherwise the first one)
+    const std::vector<std::string> variants = preprocessVariants(t);
+    if (variant.empty())
+        variant = std::find(variants.begin(), variants.end(), "none") != variants.end() ? "none" : variants.front();
+    if (variants.size() > 1) {
+        std::printf("preprocessing variants in the file:");
+        for (const std::string &v : variants)
+            std::printf(" %s", v.c_str());
+        std::printf("\n");
+    }
+    std::printf("preprocessing analyzed: %s\n", variant.c_str());
+    t = filterPreprocess(t, variant);
     const TrendReport rep = analyzeTrends(t, opt);
     if (!rep.ok) {
         std::cerr << rep.error << "\n";
@@ -81,7 +97,7 @@ int main(int argc, char **argv)
 {
     Recording rec;
     MeasureSettings settings;
-    std::string results, analyzePath, outPath;
+    std::string results, analyzePath, outPath, variant;
     TrendOptions trend;
 
     for (int i = 1; i < argc; ++i) {
@@ -117,6 +133,15 @@ int main(int argc, char **argv)
             trend.alpha = std::atof(v.c_str());
         else if (a == "--out")
             outPath = v;
+        else if (a == "--preprocess")
+            variant = v;
+        else if (a == "--clahe") {
+            settings.preprocess.clahe = true;
+            if (std::sscanf(v.c_str(), "%lf,%d", &settings.preprocess.clipLimit, &settings.preprocess.tileGrid) != 2) {
+                std::cerr << "--clahe expects clipLimit,tiles (e.g. 2,8)\n";
+                return 2;
+            }
+        }
         else if (a == "--roi") {
             if (std::sscanf(v.c_str(), "%d,%d,%d,%d", &rec.roi.x, &rec.roi.y, &rec.roi.width, &rec.roi.height) != 4) {
                 std::cerr << "--roi expects x,y,w,h\n";
@@ -130,7 +155,7 @@ int main(int argc, char **argv)
     }
 
     if (!analyzePath.empty())
-        return analyze(analyzePath, trend, outPath);
+        return analyze(analyzePath, trend, outPath, variant);
     if (rec.path.empty() || results.empty()) {
         usage();
         return 2;

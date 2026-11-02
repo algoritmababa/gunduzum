@@ -3,6 +3,8 @@
 #include "FrameSource.h"
 #include "ImageUtils.h"
 
+#include <opencv2/core/core.hpp>
+
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -128,7 +130,7 @@ void FramePlayer::tick()
         return;
     }
     m_current = index;
-    emit frameReady(toQImage(raw), index);
+    emitFrame(raw, index);
     m_updatingSlider = true;
     m_slider->setValue(index);
     m_updatingSlider = false;
@@ -157,11 +159,31 @@ void FramePlayer::showFrame(int index)
     if (!m_source->readAt(index, raw))
         return;
     m_current = index;
-    emit frameReady(toQImage(raw), index);
+    emitFrame(raw, index);
     m_updatingSlider = true;
     m_slider->setValue(index);
     m_updatingSlider = false;
     updateLabel();
+}
+
+void FramePlayer::emitFrame(cv::Mat &raw, int index)
+{
+    if (m_filter) {
+        try {
+            m_filter(raw);
+        } catch (const cv::Exception &) {
+            // show the frame unchanged when the filter cannot handle it
+        }
+    }
+    emit frameReady(toQImage(raw), index);
+}
+
+void FramePlayer::refresh()
+{
+    if (isPlaying() || m_current < 0)
+        return;
+    const int index = m_current;
+    showFrame(index);
 }
 
 void FramePlayer::updateLabel()

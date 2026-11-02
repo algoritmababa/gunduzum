@@ -6,11 +6,12 @@
 #include <QElapsedTimer>
 
 MeasureWorker::MeasureWorker(const turb::Recording &rec, const turb::MeasureSettings &settings,
-                             const QString &resultsPath, bool showFrames)
+                             const QString &resultsPath, bool showFrames, bool showPreprocessed)
     : m_rec(rec)
     , m_settings(settings)
     , m_resultsPath(resultsPath)
     , m_showFrames(showFrames)
+    , m_showPreprocessed(showPreprocessed)
     , m_cancel(false)
 {
 }
@@ -27,6 +28,12 @@ void MeasureWorker::run()
             if (timer.elapsed() - lastFrame < 66)
                 return;
             lastFrame = timer.elapsed();
+            if (m_showPreprocessed && m_settings.preprocess.clahe) {
+                cv::Mat shown = raw.clone();
+                turb::previewPreprocess(shown, turb::effectiveRoi(m_rec.roi, raw.size()), m_settings.preprocess);
+                emit frame(toQImage(shown), index);
+                return;
+            }
             emit frame(toQImage(raw), index);
         };
     const turb::MeasureOutput out = turb::measure(

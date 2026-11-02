@@ -30,8 +30,10 @@ bunun altında kalırsa analiz onu etki saymaz ("below resolution"). Bu bir öl�
 türbülans eşiği değildir. `_std` feature'larında bağıl çözünürlük, ölçümün kendi düzeyine
 (`_mean`) göre hesaplanır.
 
-Ön işleme yok: yalnızca ROI kırpma ve gri tonlama. Keskinlik ve kenar ölçümleri parlaklığa
-oranlandığı için global ışık ya da pozlama değişimi bu ölçümleri etkilemez.
+Varsayılan olarak ön işleme yok: yalnızca ROI kırpma ve gri tonlama. Keskinlik ve kenar ölçümleri
+parlaklığa oranlandığı için kazanç farkları (görüntünün sabit bir çarpanla parlaması) bu
+ölçümleri etkilemez. Sabit ofset (pus, siyah seviye) ve kontrast farkları ise etkiler. Bunun için
+isteğe bağlı **CLAHE** var (aşağıda).
 
 ## Kullanım
 
@@ -39,8 +41,9 @@ oranlandığı için global ışık ya da pozlama değişimi bu ölçümleri etk
 2. **Label**: kategori (LOW / MEDIUM / HIGH veya yeni bir ad; boş = etiketsiz) ve not
    (saat, hava, pozlama…).
 3. **ROI**: görüntü üzerinde sürükle (kayıt bazında hatırlanır).
-4. **Measurement**: pencere uzunluğu (0 = tüm kayıt tek pencere) ve sonuç dosyası.
-5. **RUN** → her pencere sonuç dosyasına bir satır olarak **eklenir**.
+4. **Preprocessing** (isteğe bağlı): CLAHE (aşağıda).
+5. **Measurement**: pencere uzunluğu (0 = tüm kayıt tek pencere) ve sonuç dosyası.
+6. **RUN** → her pencere sonuç dosyasına bir satır olarak **eklenir**.
 
 Sekmeler: **Image / ROI** (görüntü, ROI ve oynatıcı), **Results** (sonuç dosyasının içeriği),
 **Trend analysis** (aşağıda), **Log**.
@@ -64,6 +67,31 @@ Sekmeler: **Image / ROI** (görüntü, ROI ve oynatıcı), **Results** (sonuç d
   ve ROI herhangi bir karede çizilebilir.
 * **Show frames while measuring:** isteğe bağlıdır. Seçilirse RUN sırasında ölçülen kareler ekrana
   basılır; ölçümü yavaşlatmamak için saniyede en fazla ~15 kare.
+
+### Ön işleme: CLAHE (isteğe bağlı)
+
+CLAHE (*contrast limited adaptive histogram equalization*), ROI'yi `tiles x tiles` parçaya böler.
+Her parçanın histogramını `clip limit` ile sınırlayarak eşitler. Her kareye ayrı ayrı, ROI kırpma
+ve gri tonlamadan sonra uygulanır. 8 ve 16 bit görüntüleri destekler.
+
+* **Clip limit:** 2–4 hafif bir eşitleme yapar. 40 (OpenCV varsayılanı) neredeyse tam histogram
+  eşitlemedir. **Tiles per side:** 8 OpenCV varsayılanıdır; 1, tüm ROI için tek bir histogram demektir.
+* **Show the result on the image:** oynatıcıda ve ölçüm sırasında ROI'nin içi, algoritmaların
+  gördüğü haliyle gösterilir.
+* Kullanılan ayar sonuç tablosunun `preprocess` sütununa yazılır (`none` /
+  `clahe:clip=2,tiles=8`). Aynı kayıtları CLAHE'li ve CLAHE'siz olarak aynı dosyaya ölçebilirsiniz.
+  Trend analizindeki **Preprocessing** seçimi her seferinde tek bir varyantı analiz eder ve
+  karar tablolarını karşılaştırmanızı sağlar.
+* **Dikkat:** CLAHE kare kare çalışır. Bu yüzden zamansal parlaklık dalgalanmasını
+  (sintilasyon) ve parlaklık tabanlı ölçümleri de değiştirir. Testlerde:
+  * Pus ve düşük kontrast farkını clip 2 ile kısmen giderdi: kenar ölçümü farkı %53'ten %42'ye
+    indi. Clip 40 ile farkı neredeyse tamamen giderdi (%2).
+  * Kategorilerin titreşim, blur ve parlaklık titremesiyle ayrıştığı sentetik veride (clip 4),
+    *Brightness* ve *Centroid* algoritmalarının "useful" kararı "no benefit"e döndü. Yani gerçek
+    sinyal silindi.
+
+  CLAHE ile "useful" olan bir algoritma, ancak fiziksel olarak açıklanabiliyorsa ve CLAHE'siz
+  karşılaştırmayla birlikte yorumlanırsa anlamlıdır.
 
 İsteğe bağlı: "Also save per-frame values" ile kare bazında değerler ayrı bir CSV'ye yazılır.
 
@@ -120,7 +148,7 @@ testi (10.000 karıştırma, sabit tohum → tekrarlanabilir), Holm düzeltmesi,
 
 ```
 recording, category, note, source, window, start_frame, end_frame, frames,
-roi_x, roi_y, roi_w, roi_h, measured_at,
+roi_x, roi_y, roi_w, roi_h, preprocess, measured_at,
 jitter_*, centroid_*, flow_*, sharpness_*, gradient_*, change_*   (her biri _mean, _std, _p95)
 intensity_mean, intensity_std, intensity_p95, scintillation_index
 ```
@@ -128,6 +156,8 @@ intensity_mean, intensity_std, intensity_p95, scintillation_index
 Bir satır = bir kaydın bir penceresi. Tüm çalıştırmalar aynı dosyaya eklenir; analiz uygulamada
 (trend analizi) veya Excel / Python / MATLAB ile yapılabilir. Sütunları farklı bir dosyaya ekleme
 reddedilir (algoritmalar eklendiğinde sütunlar değiştiği için yeni bir sonuç dosyası başlatın).
+İstisna: `preprocess` sütunu olmayan önceki sürüm dosyaları ilk eklemede otomatik yükseltilir; eski
+satırlar `none` olarak işaretlenir.
 
 ## Derleme
 
@@ -144,8 +174,9 @@ Bulunamazsa: **Projects → Build → qmake → Additional arguments**:
 * `cli/cli.pro` → `turbulence_measure` (toplu ölçüm, aynı tabloya yazar):
   ```bash
   turbulence_measure --input /veri/kayit1 --category LOW --roi 100,100,400,300 \
-                     --window 300 --results results.csv
-  turbulence_measure --analyze results.csv [--unit recording|window] [--out trend.csv]
+                     --window 300 --results results.csv [--clahe 2,8]
+  turbulence_measure --analyze results.csv [--unit recording|window] [--out trend.csv] \
+                     [--preprocess none|clahe:clip=2,tiles=8]
   ```
 * `tests/tests.pro` → `turbulence_tests`: sentetik verilerle doğrulama. Bilinen kayma, blur ve
   parlaklık dalgalanması; pencereleme, CSV, trend analizi. **Algoritma özgüllüğü**: her senaryoda

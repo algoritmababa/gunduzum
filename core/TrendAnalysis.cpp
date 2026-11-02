@@ -197,6 +197,9 @@ TrendReport analyzeTrends(const Table &table, const TrendOptions &opt)
             rep.notes.push_back(os.str());
         }
     }
+    if (preprocessVariants(table).size() > 1)
+        rep.notes.push_back("The table mixes measurements with different preprocessing; analyze one "
+                            "preprocessing variant at a time (filterPreprocess).");
     if (rep.categories.size() < 2) {
         rep.error = "At least two of the ordered categories need labeled measurements.";
         return rep;

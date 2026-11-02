@@ -15,9 +15,10 @@ class MeasureWorker : public QObject
     Q_OBJECT
 
 public:
-    // showFrames: send the frames being measured to the GUI (throttled to ~15 per second)
+    // showFrames: send the frames being measured to the GUI (throttled to ~15 per second);
+    // showPreprocessed: those frames show the ROI after the preprocessing (what the metrics see)
     MeasureWorker(const turb::Recording &rec, const turb::MeasureSettings &settings, const QString &resultsPath,
-                  bool showFrames = false);
+                  bool showFrames = false, bool showPreprocessed = false);
     void cancel() { m_cancel = true; }
 
 public slots:
@@ -34,6 +35,7 @@ private:
     turb::MeasureSettings m_settings;
     QString m_resultsPath;
     bool m_showFrames;
+    bool m_showPreprocessed;
     std::atomic<bool> m_cancel;
 };
 
